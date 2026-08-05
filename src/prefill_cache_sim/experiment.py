@@ -28,7 +28,7 @@ from .selectors import (
 )
 from .simulator import LocalSimulator, SimulationConfig, SimulationReport
 
-RESULT_SCHEMA_VERSION = "phase-a-result-v2"
+RESULT_SCHEMA_VERSION = "phase-a-result-v3"
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +53,8 @@ class ExperimentCase:
     minimum_shared_blocks: int = 2
     family_size_cap: int = 8
     hot_block_percentile: float = 99.0
+    cache_discount: float = 0.7
+    similar_band_ratio: float = 0.1
 
     def __post_init__(self) -> None:
         if self.replay_speed <= 0:
@@ -96,6 +98,8 @@ class ExperimentResult:
     minimum_shared_blocks: int
     family_size_cap: int
     hot_block_percentile: float
+    cache_discount: float
+    similar_band_ratio: float
     completed_requests: int
     block_ref_hit_rate: float
     token_weighted_hit_rate: float
@@ -106,10 +110,11 @@ class ExperimentResult:
     uncached_token_load_max_mean: float
     request_load_cv: float
     request_load_gini: float
-    queue_wait_ms_p50: float
-    queue_wait_ms_p95: float
-    queue_wait_ms_p99: float
-    queue_wait_ms_max: float
+    queue_wait_normalized_ms_p50: float
+    queue_wait_normalized_ms_p95: float
+    queue_wait_normalized_ms_p99: float
+    queue_wait_normalized_ms_max: float
+    offered_load_ratio: float
     eviction_count: int
     rejected_placements: int
     unique_resident_blocks: int
@@ -182,9 +187,11 @@ def selector_for(case: ExperimentCase) -> PrefillNodeSelector:
         )
         return session_affinity_selector(provider, soft_alpha=case.soft_alpha)
     if case.selector_id == "S5_FLEXLB_TTFT":
-        return FlexLbTtftSelector()
+        return FlexLbTtftSelector(case.cache_discount, 0.3, case.similar_band_ratio)
     if case.selector_id == "S6_CALIBRATED_TTFT":
-        return CalibratedTtftSelector(case.prefill_uncached_token_ms)
+        return CalibratedTtftSelector(
+            case.prefill_uncached_token_ms, case.similar_band_ratio
+        )
     raise ValueError(f"unknown selector {case.selector_id}")
 
 
@@ -276,6 +283,8 @@ def result_from_report(
         case.minimum_shared_blocks,
         case.family_size_cap,
         case.hot_block_percentile,
+        case.cache_discount,
+        case.similar_band_ratio,
         report.completed_requests,
         report.block_ref_hit_rate,
         report.token_weighted_hit_rate,
@@ -290,6 +299,20 @@ def result_from_report(
         _percentile(waits, 0.95),
         _percentile(waits, 0.99),
         report.queue_wait_ms_max,
+        (
+            sum(report.per_node_uncached_tokens)
+            * case.prefill_uncached_token_ms
+            / (
+                (
+                    max(decision.arrival_ms for decision in report.decisions)
+                    - min(decision.arrival_ms for decision in report.decisions)
+                )
+                * case.node_count
+                * case.prefill_concurrency_per_node
+            )
+            if len(report.decisions) > 1
+            else 0.0
+        ),
         report.eviction_count,
         report.rejected_placements,
         report.unique_resident_blocks,

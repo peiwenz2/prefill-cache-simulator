@@ -74,11 +74,6 @@ def load_scenario(path: Path, *, schema_path: Path) -> LoadedScenario:
         capacity["total_blocks"] < cluster["prefill_nodes"]
     ):
         raise ValueError("cluster.cache_capacity.total_blocks < prefill_nodes")
-    selector = value["selector"]
-    if selector["id"] == "S4_SESSION_AFFINITY" and (
-        selector["affinity"]["family_size_cap"] > cluster["prefill_nodes"]
-    ):
-        raise ValueError("selector.affinity.family_size_cap > prefill_nodes")
     return LoadedScenario(
         path.resolve(),
         value,

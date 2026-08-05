@@ -844,15 +844,17 @@ Invariant tests：capacity 不超；pinned 不驱逐；hit 不越过首 miss；l
 
 ### M4｜Base result review
 
-- [ ] 验证 PrefixAnchor sensitivity，禁止只留 k=2。
-- [ ] 检查 hit gain 是否由单节点 overload 换来。
-- [ ] 检查 SessionAffinity proxy 是否把 shared system prompt 错当 session，验证 hot-block exclusion／family cap。
-- [ ] 预期 S4／S5 hit 接近；重点比较 skew、fallback、stale-view stability，不能以“hit 没拉开”判失败。
-- [ ] A1 用 replica factor 解释 Random fragmentation 和 affinity 去重机制。
-- [ ] 对 Top-3 做 8-seed／stale-view replay。
-- [ ] 选择进入 KVS phase 的 2 个 selector。
+- [x] 验证 PrefixAnchor sensitivity，禁止只留 k=2。
+- [x] 检查 hit gain 是否由单节点 overload 换来。
+- [x] 检查 SessionAffinity proxy 是否把 shared system prompt 错当 session，验证 hot-block exclusion／family cap。
+- [x] S4／S5 比较 skew、fallback、stale-view stability；实测 S5 没有形成 Pareto gain。
+- [x] A1 用 replica factor 解释 Random fragmentation 和 affinity 去重机制。
+- [x] 对 Top-3 做 8-seed／stale-view replay。
+- [x] 选择进入 KVS phase 的 2 个 selector：S4 production-shaped candidate＋S3 cache ceiling control。
 
 Stop：如果 S5／S6 相对简单 S3 没有 Pareto 增益，不进入复杂 selector implementation。
+
+M4 结论：stop gate 已触发。S5／S6 暂停；M5 只带 S4／S3。完整 92-case CSV 与报告见 `results/m4/`。
 
 M1–M4 作为独立可交付：S0／S1／S2＋FIFO／LRU＋正式 hit report 已完整回答 original task，不等待后续 KVS／SLO phase。
 

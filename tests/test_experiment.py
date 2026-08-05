@@ -59,7 +59,7 @@ def test_result_schema_is_flat_stable_and_conservative() -> None:
         git_dirty=False,
     )
     row = result.to_dict()
-    assert row["result_schema_version"] == "phase-a-result-v2"
+    assert row["result_schema_version"] == "phase-a-result-v3"
     assert row["prefix_anchor_k"] == 2
     assert row["trace_sha256"] == "ab" * 32
     assert row["config_sha256"] == "cd" * 32
