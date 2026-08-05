@@ -1,0 +1,69 @@
+{
+  "case_count": 97,
+  "decision": {
+    "frontier_rule": "material expansion of S3/S4 hit-skew frontier",
+    "hit_epsilon": 0.001,
+    "kvs_candidates": [
+      "S4_SESSION_AFFINITY",
+      "S3_GB_PREFIX_BUCKET"
+    ],
+    "stop_complex_selectors": [
+      "S5_FLEXLB_TTFT",
+      "S6_CALIBRATED_TTFT"
+    ]
+  },
+  "git_sha": "9a62361fd8a0c42bd9e34db934b185e4f2dda2cd",
+  "headline": {
+    "S0_RANDOM": {
+      "offered_load_ratio": 0.44556939472222223,
+      "queue_wait_normalized_ms_p95": 4096.9510000000055,
+      "replica_factor": 1.2269637554906627,
+      "request_load_max_mean": 1.013046424940698,
+      "token_weighted_hit_rate": 0.4429690443791879
+    },
+    "S1_ROUND_ROBIN": {
+      "offered_load_ratio": 0.44597367661111115,
+      "queue_wait_normalized_ms_p95": 3875.5889600001615,
+      "replica_factor": 1.229649304018494,
+      "request_load_max_mean": 1.0,
+      "token_weighted_hit_rate": 0.4424636292192253
+    },
+    "S2_LEAST_WORK": {
+      "offered_load_ratio": 0.4506200901666667,
+      "queue_wait_normalized_ms_p95": 8060.675440000206,
+      "replica_factor": 1.233380201781001,
+      "request_load_max_mean": 1.0120298203998646,
+      "token_weighted_hit_rate": 0.4366548905273002
+    },
+    "S3_GB_PREFIX_BUCKET": {
+      "offered_load_ratio": 0.3678855257222223,
+      "queue_wait_normalized_ms_p95": 3103.4838400000053,
+      "replica_factor": 1.0451941970818177,
+      "request_load_max_mean": 1.8217553371738393,
+      "token_weighted_hit_rate": 0.5400859475999957
+    },
+    "S4_SESSION_AFFINITY": {
+      "offered_load_ratio": 0.3732604623888889,
+      "queue_wait_normalized_ms_p95": 3011.4564799999816,
+      "replica_factor": 1.0748758518391126,
+      "request_load_max_mean": 1.047272111148763,
+      "token_weighted_hit_rate": 0.5333664418545412
+    },
+    "S5_FLEXLB_TTFT": {
+      "offered_load_ratio": 0.38142072511111114,
+      "queue_wait_normalized_ms_p95": 6589.078320000111,
+      "replica_factor": 1.0607828577490188,
+      "request_load_max_mean": 1.6463910538800406,
+      "token_weighted_hit_rate": 0.523164845882919
+    },
+    "S6_CALIBRATED_TTFT": {
+      "offered_load_ratio": 0.37299695772222224,
+      "queue_wait_normalized_ms_p95": 6392.8172800000175,
+      "replica_factor": 1.0616838305552607,
+      "request_load_max_mean": 1.2687224669603525,
+      "token_weighted_hit_rate": 0.5336958636191922
+    }
+  },
+  "schema": "phase-a-m4-summary-v1",
+  "trace_sha256": "b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711"
+}
