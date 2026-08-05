@@ -1251,14 +1251,14 @@ seed                 = 713..720
 <p>Tests：空 trace、坏 JSON、重复 timestamp、短于一 block、partial block、超长 request。</p>
 <h3>M2｜Core interfaces／LOCAL_ONLY</h3>
 <ul>
-<li><input disabled="" type="checkbox"> <code>Request</code>／<code>NodeSnapshot</code>／<code>ClusterView</code>／<code>Selection</code>。</li>
-<li><input disabled="" type="checkbox"> <code>PrefillNodeSelector</code>／<code>BlockEvictionPolicy</code>／<code>CacheTopology</code>／<code>PrefillRequestProcessor</code>。</li>
-<li><input disabled="" type="checkbox"> <code>ContinuationPrefixBuilder</code>，覆盖 partial input tail 与 generated chain。</li>
-<li><input disabled="" type="checkbox"> continuous-prefix lookup。</li>
-<li><input disabled="" type="checkbox"> pinned block／placement／eviction／stranded accounting。</li>
-<li><input disabled="" type="checkbox"> <code>CACHE_ONLY／QUEUED</code> 两种 replay mode；event loop 用 heap 管 arrival、prefill start／finish、cache insert／evict。</li>
-<li><input disabled="" type="checkbox"> <code>INSERT_AT_COMPLETION／INFLIGHT_DEDUP_WAIT</code> visibility；默认前者。</li>
-<li><input disabled="" type="checkbox"> <code>ORACLE</code>／<code>DELAYED</code>／<code>LOSSY</code> view。</li>
+<li><input checked="" disabled="" type="checkbox"> <code>Request</code>／<code>NodeSnapshot</code>／<code>ClusterView</code>／<code>Selection</code>。</li>
+<li><input checked="" disabled="" type="checkbox"> <code>PrefillNodeSelector</code>／<code>BlockEvictionPolicy</code>／<code>CacheTopology</code>／<code>PrefillRequestProcessor</code>。</li>
+<li><input checked="" disabled="" type="checkbox"> <code>ContinuationPrefixBuilder</code>，覆盖 partial input tail、generated chain 与 multi-round continuation。</li>
+<li><input checked="" disabled="" type="checkbox"> continuous-prefix lookup。</li>
+<li><input checked="" disabled="" type="checkbox"> pinned block／placement／eviction／stranded accounting；当前 request 不允许 self-eviction。</li>
+<li><input checked="" disabled="" type="checkbox"> <code>CACHE_ONLY／QUEUED</code> 两种 replay mode；event loop 用 heap 管 arrival、prefill start／finish、cache insert／evict。</li>
+<li><input checked="" disabled="" type="checkbox"> <code>INSERT_AT_COMPLETION／INFLIGHT_DEDUP_WAIT</code> visibility；wait token／ms 独立记账。</li>
+<li><input checked="" disabled="" type="checkbox"> <code>ORACLE</code>／<code>DELAYED</code> view＋per-node lossy cache stats；与 schema 1.0.0 vocabulary 对齐。</li>
 </ul>
 <p>Invariant tests：capacity 不超；pinned 不驱逐；hit 不越过首 miss；logical／attempt token 不重复计。</p>
 <h3>M3｜Baseline selectors／eviction</h3>

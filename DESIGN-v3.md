@@ -817,14 +817,14 @@ Tests：空 trace、坏 JSON、重复 timestamp、短于一 block、partial bloc
 
 ### M2｜Core interfaces／LOCAL_ONLY
 
-- [ ] `Request`／`NodeSnapshot`／`ClusterView`／`Selection`。
-- [ ] `PrefillNodeSelector`／`BlockEvictionPolicy`／`CacheTopology`／`PrefillRequestProcessor`。
-- [ ] `ContinuationPrefixBuilder`，覆盖 partial input tail 与 generated chain。
-- [ ] continuous-prefix lookup。
-- [ ] pinned block／placement／eviction／stranded accounting。
-- [ ] `CACHE_ONLY／QUEUED` 两种 replay mode；event loop 用 heap 管 arrival、prefill start／finish、cache insert／evict。
-- [ ] `INSERT_AT_COMPLETION／INFLIGHT_DEDUP_WAIT` visibility；默认前者。
-- [ ] `ORACLE`／`DELAYED`／`LOSSY` view。
+- [x] `Request`／`NodeSnapshot`／`ClusterView`／`Selection`。
+- [x] `PrefillNodeSelector`／`BlockEvictionPolicy`／`CacheTopology`／`PrefillRequestProcessor`。
+- [x] `ContinuationPrefixBuilder`，覆盖 partial input tail、generated chain 与 multi-round continuation。
+- [x] continuous-prefix lookup。
+- [x] pinned block／placement／eviction／stranded accounting；当前 request 不允许 self-eviction。
+- [x] `CACHE_ONLY／QUEUED` 两种 replay mode；event loop 用 heap 管 arrival、prefill start／finish、cache insert／evict。
+- [x] `INSERT_AT_COMPLETION／INFLIGHT_DEDUP_WAIT` visibility；wait token／ms 独立记账。
+- [x] `ORACLE`／`DELAYED` view＋per-node lossy cache stats；与 schema 1.0.0 vocabulary 对齐。
 
 Invariant tests：capacity 不超；pinned 不驱逐；hit 不越过首 miss；logical／attempt token 不重复计。
 

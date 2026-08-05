@@ -7,9 +7,12 @@ import json
 from array import array
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .identity import logical_request_id
+
+if TYPE_CHECKING:
+    from .domain import Request
 
 
 class TraceValidationError(ValueError):
@@ -138,3 +141,31 @@ def load_trace(path: Path, *, block_size_tokens: int) -> LoadedTrace:
         ) in enumerate(raw_records)
     )
     return LoadedTrace(path, trace_sha256, block_size_tokens, records)
+
+
+def to_simulation_requests(
+    trace: LoadedTrace,
+    *,
+    replay_speed: float = 1.0,
+) -> tuple[Request, ...]:
+    """Convert validated trace records into core simulation requests."""
+    if replay_speed <= 0:
+        raise ValueError("replay_speed must be positive")
+    from .domain import BlockRef, Request
+
+    return tuple(
+        Request(
+            request_id=record.request_id,
+            logical_request_id=record.request_id,
+            attempt_index=0,
+            arrival_ms=record.timestamp_ms / replay_speed,
+            input_tokens=record.input_tokens,
+            output_tokens=record.output_tokens,
+            prefix_blocks=tuple(
+                BlockRef.trace(block) for block in record.prefix_blocks
+            ),
+            block_token_sizes=tuple(record.block_token_sizes),
+            affinity_key=None,
+        )
+        for record in trace.records
+    )
