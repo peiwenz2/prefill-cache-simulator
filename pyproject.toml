@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "prefill-cache-sim"
+version = "0.1.0"
+description = "Deterministic simulator for prefill KV-cache placement policies"
+requires-python = ">=3.11"
+dependencies = ["jsonschema>=4.23"]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "ruff>=0.9"]
+
+[project.scripts]
+prefill-cache-sim = "prefill_cache_sim.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/prefill_cache_sim"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"scenario.schema.json" = "prefill_cache_sim/scenario.schema.json"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: exercises the complete Mooncake trace"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

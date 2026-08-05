@@ -1,0 +1,1445 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prefill Cache Simulator：从 baseline 到 KVS／SLO lifecycle planner</title>
+<style>
+:root{--bg:#f6f8fb;--panel:#fff;--ink:#1f2937;--muted:#667085;--line:#d8dee9;--accent:#4338ca;--accent-soft:#eef2ff;--ok:#15803d;--ok-soft:#ecfdf3;--warn:#b45309;--warn-soft:#fff7ed;--bad:#b91c1c;--bad-soft:#fef2f2;--code:#f2f4f9}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.68 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}header{background:#fff;border-bottom:1px solid var(--line)}.hero{max-width:1180px;margin:auto;padding:42px 34px}.pills{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px}.pill{padding:3px 9px;border-radius:5px;background:#eef2f6;color:#475569;font-size:12px;font-weight:650}.pill.p1{background:var(--warn-soft);color:var(--warn)}.pill.review{background:var(--accent-soft);color:var(--accent)}h1{font-size:34px;line-height:1.2;margin:0 0 12px;letter-spacing:-.02em}.lead{max-width:900px;color:var(--muted);font-size:17px;margin:0}.layout{max-width:1180px;margin:auto;display:grid;grid-template-columns:205px minmax(0,1fr);gap:26px;padding:32px 34px}.toc{position:sticky;top:20px;align-self:start}.toc-title{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:#94a3b8;margin-bottom:10px}.toc a{display:block;color:var(--muted);padding:6px 9px;border-left:2px solid transparent;font-size:13px}.toc a.active{color:var(--accent);border-left-color:var(--accent);font-weight:650}.content{min-width:0}.section{background:#fff;border:1px solid var(--line);border-radius:10px;padding:30px;margin-bottom:24px;scroll-margin-top:18px;overflow-x:hidden}.section>h2{font-size:24px;margin:0 0 20px;padding-bottom:10px;border-bottom:1px solid var(--line)}h2{font-size:21px;margin:28px 0 12px}h3{font-size:17px;margin:24px 0 9px}p{margin:8px 0 14px}ul,ol{margin:8px 0 16px;padding-left:24px}li{margin:4px 0}table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:13px;display:block;overflow-x:auto}thead{background:#f8fafc}th,td{border:1px solid var(--line);padding:9px 10px;text-align:left;vertical-align:top;min-width:110px}th{font-weight:650;color:#334155}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);color:#334155;border-radius:4px;padding:1px 4px;font-size:.87em}pre{background:var(--code);color:#273449;border:1px solid var(--line);border-radius:7px;padding:14px;overflow:auto;white-space:pre}pre code{padding:0;background:transparent}.diagram{border:1px solid var(--line);border-radius:8px;background:#fbfcfe;padding:10px;margin:16px 0}.diagram svg{display:block;width:100%;height:auto}.tabs{display:flex;border-bottom:1px solid var(--line);gap:4px;margin-top:18px}.tab{border:0;background:transparent;padding:9px 13px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}.tab[aria-selected=true]{color:var(--accent);border-bottom-color:var(--accent);font-weight:650}.tab-panel[hidden]{display:none}.caption{font-size:12px;color:var(--muted);margin:7px 4px 14px}.node{cursor:pointer}.node:hover{filter:brightness(.98)}blockquote{margin:14px 0;border-left:3px solid var(--accent);background:var(--accent-soft);padding:10px 14px;color:#3f4661}dialog{border:1px solid var(--line);border-radius:9px;padding:0;max-width:600px;width:calc(100% - 32px);box-shadow:0 20px 60px #0f172a33}dialog::backdrop{background:#0f172a66}.dialog-head{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line)}.dialog-head h3{margin:0}.dialog-body{padding:16px 18px;color:var(--muted)}.close{border:0;background:transparent;font-size:22px;color:var(--muted);cursor:pointer}.note{border-left:3px solid var(--warn);background:var(--warn-soft);padding:10px 14px;margin:14px 0;color:#70410b;font-size:13px}.footer{color:var(--muted);font-size:12px;text-align:center;padding:4px 0 28px}
+@media(max-width:850px){.layout{display:block;padding:20px 14px}.toc{display:none}.hero{padding:30px 20px}.section{padding:22px 17px}h1{font-size:28px}}
+@media print{body{background:#fff}.toc{display:none}.layout{display:block;max-width:none}.section{break-inside:avoid;border-color:#cbd5e1}}
+</style></head><body>
+<header><div class="hero"><div class="pills"><span class="pill p1">P1</span><span class="pill review">M1 Complete</span><span class="pill">Build Spec</span><span class="pill">作者：张珮文</span></div><h1>Prefill Cache Simulator：从 baseline 到 KVS／SLO lifecycle planner</h1><p class="lead">Fable review 已完成，abstraction boundary 成立，M0／M1 已通过 Opus milestone gate。Schema 1.x 严格冻结 Phase A；trace analyzer 已复现 block-ref 与 token-weighted ceiling。下一步实现 LOCAL_ONLY core interfaces，再推进 Global Batching、Session affinity 与 FlexLB cache-aware。</p></div></header>
+<div class="layout"><nav class="toc"><div class="toc-title">目录</div><a href="#arch">1. 总体架构</a><a href="#design">2. 详细设计</a><a href="#eval">3. 关键技术评估</a><a href="#risk">4. 风险与备选</a><a href="#rollout">5. Rollout</a><a href="#ref">6. 引用</a></nav><main class="content">
+<section id="arch" class="section"><h2>1. 总体架构</h2><div class="tabs" role="tablist"><button class="tab" data-tab="baseline" aria-selected="true">基础模拟</button><button class="tab" data-tab="runtime" aria-selected="false">KVS／SLO runtime</button></div><div class="tab-panel diagram" data-panel="baseline"><svg viewBox="0 0 820 410" role="img" aria-label="基础模拟架构"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#64748b"/></marker><marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#15803d"/></marker></defs>
+  <rect class="node" data-node="request" x="35" y="135" width="150" height="64" rx="6" fill="#e8f0ff" stroke="#4338ca" stroke-width="1.5"/><text x="110" y="161" text-anchor="middle" font-size="13" font-weight="650">Mooncake trace</text><text x="110" y="181" text-anchor="middle" font-size="11" fill="#475569">request + hash_ids</text>
+  <rect class="node" data-node="planner" x="245" y="135" width="190" height="64" rx="6" fill="#fff7ed" stroke="#b45309" stroke-width="1.5"/><text x="340" y="161" text-anchor="middle" font-size="13" font-weight="650">Selector + Processor</text><text x="340" y="181" text-anchor="middle" font-size="11" fill="#475569">GB／Session／FlexLB</text>
+  <rect class="node" data-node="prefill" x="510" y="55" width="240" height="72" rx="6" fill="#e8f0ff" stroke="#4338ca" stroke-width="1.5"/><text x="630" y="84" text-anchor="middle" font-size="13" font-weight="650">N × Prefill node</text><text x="630" y="104" text-anchor="middle" font-size="11" fill="#475569">capacity gate + queue estimate</text>
+  <rect class="node" data-node="decode" x="510" y="155" width="240" height="72" rx="6" fill="#f2f4f9" stroke="#94a3b8" stroke-width="1.5"/><text x="630" y="184" text-anchor="middle" font-size="13" font-weight="650" fill="#64748b">Decode node（Phase A 不模拟）</text><text x="630" y="204" text-anchor="middle" font-size="11" fill="#64748b">D0 fixed completion</text>
+  <rect class="node" data-node="kvs" x="510" y="255" width="240" height="72" rx="6" fill="#f2f4f9" stroke="#94a3b8" stroke-width="1.5"/><text x="630" y="284" text-anchor="middle" font-size="13" font-weight="650" fill="#64748b">Shared KVS（Phase A 不模拟）</text><text x="630" y="304" text-anchor="middle" font-size="11" fill="#64748b">LOCAL_ONLY</text>
+  <path d="M185 167 L245 167" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/><path d="M435 155 L472 155 L472 91 L510 91" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M630 127 L630 155" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+  <text x="205" y="154" font-size="10" fill="#64748b">select</text><text x="458" y="82" font-size="10" fill="#64748b">prefill</text>
+  <g transform="translate(35,365)" font-size="10" fill="#64748b"><rect width="12" height="12" fill="#e8f0ff" stroke="#4338ca"/><text x="18" y="10">active compute</text><rect x="130" width="12" height="12" fill="#fff7ed" stroke="#b45309"/><text x="148" y="10">decision</text><rect x="245" width="12" height="12" fill="#f2f4f9" stroke="#94a3b8"/><text x="263" y="10">later phase</text></g>
+</svg></div><div class="tab-panel diagram" data-panel="runtime" hidden><svg viewBox="0 0 820 410" role="img" aria-label="KVS SLO 生命周期架构"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#64748b"/></marker><marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#15803d"/></marker></defs>
+  <rect class="node" data-node="request" x="35" y="135" width="150" height="64" rx="6" fill="#e8f0ff" stroke="#4338ca" stroke-width="1.5"/><text x="110" y="161" text-anchor="middle" font-size="13" font-weight="650">Logical request</text><text x="110" y="181" text-anchor="middle" font-size="11" fill="#475569">tier + SLO + affinity</text>
+  <rect class="node" data-node="planner" x="245" y="135" width="190" height="64" rx="6" fill="#fff7ed" stroke="#b45309" stroke-width="1.5"/><text x="340" y="161" text-anchor="middle" font-size="13" font-weight="650">Lifecycle Planner</text><text x="340" y="181" text-anchor="middle" font-size="11" fill="#475569">probe／reserve／commit</text>
+  <rect class="node" data-node="prefill" x="510" y="55" width="240" height="72" rx="6" fill="#e8f0ff" stroke="#4338ca" stroke-width="1.5"/><text x="630" y="84" text-anchor="middle" font-size="13" font-weight="650">Prefill pool</text><text x="630" y="104" text-anchor="middle" font-size="11" fill="#475569">cache + TTFT admission</text>
+  <rect class="node" data-node="decode" x="510" y="155" width="240" height="72" rx="6" fill="#e8f0ff" stroke="#4338ca" stroke-width="1.5"/><text x="630" y="184" text-anchor="middle" font-size="13" font-weight="650">Decode pool</text><text x="630" y="204" text-anchor="middle" font-size="11" fill="#475569">lease + cooperative preemption</text>
+  <rect class="node" data-node="kvs" x="510" y="255" width="240" height="72" rx="6" fill="#ecfdf3" stroke="#15803d" stroke-width="1.5"/><text x="630" y="284" text-anchor="middle" font-size="13" font-weight="650">Shared KVS / checkpoint</text><text x="630" y="304" text-anchor="middle" font-size="11" fill="#475569">prefix + optional Decode state</text>
+  <path d="M185 167 L245 167" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/><path d="M435 155 L472 155 L472 91 L510 91" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/><path d="M435 179 L472 179 L472 191 L510 191" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M630 127 L630 155" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/><path d="M605 227 L605 255" stroke="#15803d" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#arrow-green)"/><path d="M655 255 L655 227" stroke="#15803d" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#arrow-green)"/>
+  <text x="198" y="154" font-size="10" fill="#64748b">plan</text><text x="570" y="244" font-size="10" fill="#15803d">checkpoint／restore</text>
+  <g transform="translate(35,365)" font-size="10" fill="#64748b"><rect width="12" height="12" fill="#e8f0ff" stroke="#4338ca"/><text x="18" y="10">compute</text><rect x="100" width="12" height="12" fill="#fff7ed" stroke="#b45309"/><text x="118" y="10">control</text><rect x="200" width="12" height="12" fill="#ecfdf3" stroke="#15803d"/><text x="218" y="10">state transfer</text></g>
+</svg></div><p class="caption">两个视角保持组件位置一致。点击节点查看职责；Phase A 只回答 prefill selector／eviction，Phase B–D 才引入 KVS、SLO 与 Decode lifecycle。</p><h2>0. 先给结论</h2>
+<h3>0.1 可行，但必须分成两个 abstraction axis</h3>
+<pre><code class="language-text">CacheTopology × ExecutionProtocol
+
+CacheTopology：LOCAL_ONLY ｜ SHARED_KVS ｜ HYBRID
+ExecutionProtocol：
+  HandoffProtocol：PD ｜ DP ｜ gated-PD ｜ gated-DP ｜ KVS_DECOUPLED
+  DecodePolicy：D0 ｜ D1 fixed lease ｜ D1.5 adaptive lease ｜ D2 cooperative preemption
+</code></pre>
+<ul>
+<li><code>CacheTopology</code> 回答：prefix 在哪里、命中了多少、需要 local load／remote KVT／recompute、谁负责 eviction。</li>
+<li><code>ExecutionProtocol</code> 内部再拆 handoff 与 Decode policy，回答什么时候选 P、什么时候锁 D、何时 COMMIT、何时 hold／reject、Decode 是否续租／迁移。</li>
+<li>selector 只选 P，是 original task 的 scope；<code>RequestLifecyclePlanner</code> 是张珮文要验证的扩展，不强塞进 selector interface。</li>
+</ul>
+<p>两个 axis 不是全笛卡尔积。协议可以声明 topology capability requirement，但不能绕过统一接口直接读取 store 内部状态：</p>
+<table>
+<thead>
+<tr>
+<th>CacheTopology／Protocol</th>
+<th align="right">P0 PD</th>
+<th align="right">P1 DP</th>
+<th align="right">P2 gated-PD</th>
+<th align="right">P3 gated-DP</th>
+<th align="right">P4 KVS decoupled</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>LOCAL_ONLY</code></td>
+<td align="right">合法</td>
+<td align="right">合法</td>
+<td align="right">合法</td>
+<td align="right">合法</td>
+<td align="right"><strong>非法</strong>：P-now／D-later 没有持久载体</td>
+</tr>
+<tr>
+<td><code>SHARED_KVS</code></td>
+<td align="right">合法</td>
+<td align="right">合法</td>
+<td align="right">合法</td>
+<td align="right">合法</td>
+<td align="right">合法</td>
+</tr>
+<tr>
+<td><code>HYBRID</code></td>
+<td align="right">合法</td>
+<td align="right">合法</td>
+<td align="right">合法</td>
+<td align="right">合法</td>
+<td align="right">合法</td>
+</tr>
+</tbody></table>
+<p>另有一个独立 capability：D2-R2 要求 <code>DecodeCheckpointStore</code>。它不能由 <code>SHARED_KVS</code> 自动推出，因为 prefix object 与 Decode checkpoint 的生命周期、一致性和 fencing 不同。</p>
+<h3>0.2 三个明确保留的跨 axis coupling</h3>
+<table>
+<thead>
+<tr>
+<th>Coupling</th>
+<th>为什么无法消除</th>
+<th>接口边界</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Eviction externality</td>
+<td>selector 把请求放到某个 P，会改变该节点的 eviction pressure</td>
+<td>topology 返回 placement／eviction cost，selector 只消费 estimate</td>
+</tr>
+<tr>
+<td>P4 store occupancy</td>
+<td>P4 的 P-now 会产生中间 KV，占用 topology capacity</td>
+<td>protocol 发 placement intent，topology 决定 admit／evict／reject</td>
+</tr>
+<tr>
+<td>Decode continuation repricing</td>
+<td>D1／D2 的 sent tokens 会改变下次 prefill／KVT 成本</td>
+<td><code>ContinuationPrefixBuilder</code> 生成 block refs，再统一走 topology lookup</td>
+</tr>
+</tbody></table>
+<p>这三点在进入对应 phase 的 major schema 时写入 executable contract 和 decision trace。<code>scenario.schema.json</code> 1.x 只冻结 Phase A，不提前承诺 B–D 的配置语义。除此之外，selector 不感知 protocol 名称，protocol 也不直接实现 cache policy。</p>
+<h3>0.3 Decode abort 可做，但产品语义必须叫 cooperative preemption</h3>
+<p>允许三种动作，按风险递增：</p>
+<table>
+<thead>
+<tr>
+<th>Level</th>
+<th>动作</th>
+<th>当前基础</th>
+<th>用户流语义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>D0</td>
+<td>不动 Decode</td>
+<td>现状</td>
+<td>请求跑到结束</td>
+</tr>
+<tr>
+<td>D1</td>
+<td>token lease 到期，自然 <code>LENGTH</code>，client 吞掉中间终态后 continuation</td>
+<td>已有 Decode lease 实践</td>
+<td>无中间 <code>LENGTH</code>，换 D 继续</td>
+</tr>
+<tr>
+<td>D2</td>
+<td>lease checkpoint 主动 <code>abort_self</code>，再 continuation</td>
+<td>已有 Passport／action grant 设计基础</td>
+<td>cooperative preemption</td>
+</tr>
+<tr>
+<td>D3</td>
+<td>任意时刻 hard abort</td>
+<td>只作 overload／故障止损</td>
+<td>必须有 checkpoint，否则不可作为优化路径</td>
+</tr>
+</tbody></table>
+<p><strong>第一阶段只模拟 D1。</strong> D2 只有在 D1 实锤收益、且 continuation recovery cost 可控后才进入实现。D3 不进入正常调度策略。</p>
+<h3>0.4 优化目标不是 raw cache hit，也不是 raw token throughput</h3>
+<p>Phase C 之后的主指标采用 strict cliff：</p>
+<pre><code class="language-text">strict_completed_goodput
+  = Σ 完成且满足请求 SLO 的 useful tokens / wall time
+
+lenient_completed_goodput
+  = Σ 所有完成请求的 useful tokens / wall time
+</code></pre>
+<ul>
+<li>strict 是主指标；完成但 SLO 违约的请求贡献 0。</li>
+<li>lenient 是辅助指标，用于识别策略是否只在 deadline 边界刷 strict 分数。</li>
+<li>partial output 只单列，不进入 completed goodput。</li>
+<li>Phase A 没有 synthetic SLO，主指标只用 token／block-ref hit 与 load skew，不报告 goodput。</li>
+<li>如果用单一 scalar 排序，全部权重写入 report，并做 sensitivity；不能藏在 config 里。</li>
+</ul>
+<p>必须同时报告：</p>
+<ul>
+<li>cache：local／remote／recompute token；</li>
+<li>SLO：TTFT、TPOT、completion deadline attainment；</li>
+<li>waste：aborted compute、re-prefill、duplicate output、idle D reservation；</li>
+<li>fairness：per-tenant normalized service、worst wait、preempt 次数；</li>
+<li>amplification：每个 logical request 的 P／D attempt 数和 KVT 次数。</li>
+</ul>
+<p>只让部分请求更快、但让更多请求做一半被杀，不算吞吐提升。</p>
+<hr>
+<h2>1. Evidence base：不另起炉灶</h2>
+<h3>1.1 本地代码与既有实践</h3>
+<table>
+<thead>
+<tr>
+<th>素材</th>
+<th>已有机制</th>
+<th>本设计如何复用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Turbo <code>CacheAwareScheduler</code></td>
+<td>pull-based queue；实例按 cache bucket range 拉请求；同时受 batch、running token、prefill concurrency、prefill token 四道容量限制</td>
+<td>模拟 <code>GBPrefixBucketSelector</code>＋<code>AdmissionView</code></td>
+</tr>
+<tr>
+<td>Turbo <code>StickySessionScheduler</code></td>
+<td>bucket primary／alternative range；找不到匹配 engine 时不硬 fallback；同样带 batch／token／prefill capacity gate</td>
+<td>模拟 <code>StickySessionSelector</code>＋bounded fallback</td>
+</tr>
+<tr>
+<td>Turbo <code>PdPrefillScheduler</code></td>
+<td>request／token capacity、length capacity、engine 上报的 cached token queue snapshot</td>
+<td>定义 selector 可见的 <code>NodeSnapshot</code></td>
+</tr>
+<tr>
+<td>FlexLB <code>ShortestTTFTStrategy</code></td>
+<td><code>TTFT = queueTime + tokens - 0.7×hitCacheTokens</code>；top 30%＋similar band＋last-selected CAS fairness</td>
+<td>模拟 <code>FlexLbTtftSelector</code>，保持公式版本可替换</td>
+</tr>
+<tr>
+<td>Session affinity shadow 实践</td>
+<td>synchronous、bounded、fail-open；mock 不能冒充 production semantics</td>
+<td><code>AffinityKeyProvider</code> 独立，trace 无 session ID 时明确叫 proxy</td>
+</tr>
+<tr>
+<td>KV-Ledger／S6</td>
+<td>logical request 首次 P 命中口径与后续 retry／resched 的 engine work 口径分开</td>
+<td>指标分 user view 与 engine view</td>
+</tr>
+<tr>
+<td>V6dCacheQueryUtil</td>
+<td>prefill 前可用 token IDs 查询 KVS 命中，失败可降级 unknown</td>
+<td><code>KvsLookup</code> 可插拔，先 simulation、后 shadow query</td>
+</tr>
+<tr>
+<td>gated-PD</td>
+<td>P PREPARE／probe、D RESERVE、P COMMIT／ROLLBACK、pending token ledger</td>
+<td><code>GatedPdProtocol</code> 状态机</td>
+</tr>
+<tr>
+<td>Decode lease</td>
+<td>token cap → continuation resched；无 retry penalty／backoff；attempt ID 唯一；中间 <code>LENGTH</code> 不透用户</td>
+<td><code>LeasedDecodeProtocol</code> v1</td>
+</tr>
+<tr>
+<td>autoTPM Decode preemption</td>
+<td>high 抢 decode-low；<code>Throttling.Aborted</code> 后 fresh-from-P；历史暴露 low starvation 风险</td>
+<td>作为 aggressive baseline，不作为默认答案</td>
+</tr>
+<tr>
+<td>Passport／epoch-seq fence</td>
+<td>owner、attempt、grant、checkpoint、late frame drop</td>
+<td>D2 cooperative preemption 的正确性底座</td>
+</tr>
+</tbody></table>
+<p>代码证据版本：</p>
+<ul>
+<li>dashscope-platform：本地缓存的 <code>origin/main@afb893c7e826</code>。本轮 fetch 因内网凭证失败；相关 selector 文件与当前 working commit 内容一致，但开工前仍必须重新 fetch。</li>
+<li>RTP-LLM：<code>origin/main@cd77137bf307</code>；working tree 比它少 18 commit，但本轮引用的两个 FlexLB 文件在两者之间无 diff。</li>
+<li>dashserving：已 fetch <code>aone/main@fe13ca3f1c3b</code>；当前 checkout 有用户改动，不读取 checkout 作为 main 真值。</li>
+<li>dashllm：Aone fetch 成功；实现阶段重新钉目标 branch／commit。</li>
+</ul>
+<p>关键 file anchors：</p>
+<ul>
+<li><code>dashscope-platform/dashscope-turbo/dashscope-turbo-server/src/main/java/com/alibaba/dashscope/turbo/batch/scheduler/CacheAwareScheduler.java:1196-1202</code>：四维 capacity gate。</li>
+<li><code>dashscope-platform/dashscope-turbo/dashscope-turbo-server/src/main/java/com/alibaba/dashscope/turbo/batch/scheduler/CacheAwareScheduler.java:1295-1339</code>：priority queue＋primary／secondary bucket fetch。</li>
+<li><code>dashscope-platform/dashscope-turbo/dashscope-turbo-server/src/main/java/com/alibaba/dashscope/turbo/batch/scheduler/StickySessionScheduler.java:613-670</code>：bucket → primary／alternative engine。</li>
+<li><code>dashscope-platform/dashscope-turbo/dashscope-turbo-server/src/main/java/com/alibaba/dashscope/turbo/batch/scheduler/StickySessionScheduler.java:752-770</code>：capacity gate＋range fetch。</li>
+<li><code>RTP-LLM/rtp_llm/flexlb/flexlb-common/src/main/java/org/flexlb/dao/master/TaskInfo.java:32-38</code>：FlexLB prefill cost。</li>
+<li><code>RTP-LLM/rtp_llm/flexlb/flexlb-sync/src/main/java/org/flexlb/balance/strategy/ShortestTTFTStrategy.java:187-205</code>：cache hit＋queue 合并成 TTFT。</li>
+<li><code>RTP-LLM/rtp_llm/flexlb/flexlb-sync/src/main/java/org/flexlb/balance/strategy/ShortestTTFTStrategy.java:287-377</code>：similar band＋last-selected fairness。</li>
+<li><code>~/dev-trees/DECODE_LEASE_HANDOFF.md</code>：Decode lease 已落地语义与 safety invariants。</li>
+<li><code>~/Code/tongyi/github/HANDOFF-gated-pd-ttft-admission.md</code>：gated-PD PREPARE／RESERVE／COMMIT。</li>
+<li><code>~/Downloads/client_token_scheduling_v0.2.md</code>：PP1／PP2、SLO slack、公平性、capacity lease。</li>
+</ul>
+<h3>1.2 Mooncake trace 能证明什么</h3>
+<p>本地 trace：</p>
+<table>
+<thead>
+<tr>
+<th>字段／事实</th>
+<th align="right">数值</th>
+<th>边界</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>requests</td>
+<td align="right">23,608</td>
+<td>1 小时</td>
+</tr>
+<tr>
+<td>input 平均</td>
+<td align="right">8,589.96 tokens</td>
+<td>与论文正文 7,590 不同，不能混用</td>
+</tr>
+<tr>
+<td>output 平均</td>
+<td align="right">182.13 tokens</td>
+<td>可用于 synthetic decode duration</td>
+</tr>
+<tr>
+<td>block refs</td>
+<td align="right">409,356</td>
+<td>block size 512</td>
+</tr>
+<tr>
+<td>unique block IDs</td>
+<td align="right">183,166</td>
+<td>block-ref compulsory miss 口径</td>
+</tr>
+<tr>
+<td>block-ref infinite ceiling</td>
+<td align="right">55.255%</td>
+<td><code>(409,356−183,166)／409,356</code></td>
+</tr>
+<tr>
+<td>token-weighted infinite ceiling</td>
+<td align="right">57.070%</td>
+<td>partial last block 按实际 token 数加权</td>
+</tr>
+<tr>
+<td>timestamp</td>
+<td align="right">0～3,600,000 ms</td>
+<td>可做 arrival replay</td>
+</tr>
+</tbody></table>
+<p>trace 没有：</p>
+<ul>
+<li>session ID；</li>
+<li>tenant／user；</li>
+<li>service tier／deadline；</li>
+<li>P／D 实测 latency；</li>
+<li>KVT latency／bandwidth；</li>
+<li>GPU batch state。</li>
+</ul>
+<p>因此：</p>
+<ol>
+<li>基础 cache result 可以直接由 trace 得出。</li>
+<li>SessionAffinity 只能使用明确标注的 <code>AffinityKeyProxy</code>，不能声称是真 session。</li>
+<li>SLO／fairness 实验必须使用 deterministic overlay＋多 seed sensitivity，不能冒充生产分布。</li>
+<li>GPU 秒、KVT 时间只在校准后进入正式结论。</li>
+</ol>
+<h4>Hit metric contract</h4>
+<p>以下两个口径必须同时产出，禁止在同一列里混用：</p>
+<pre><code class="language-text">block_ref_hit_rate
+  = continuous-prefix hit block refs / total block refs
+
+token_weighted_hit_rate
+  = continuous-prefix hit tokens / total input tokens
+</code></pre>
+<p><code>57.070% &gt; 55.255%</code> 是 partial block token weighting 导致，不是有限容量超过 compulsory-miss ceiling。§3.4 临时表测的是 <code>token_weighted_hit_rate</code>。与 Mooncake 论文约 50% 的结果对照前，必须先确认论文图表使用的 metric／block completion 语义，不能仅按容量数值直接比较。</p>
+<hr>
+</section>
+<section id="design" class="section"><h2>2. 详细设计</h2><h2>2. Simulator domain model</h2>
+<h3>2.1 Request</h3>
+<pre><code class="language-python">@dataclass(frozen=True)
+class Request:
+    request_id: str
+    arrival_ms: int
+    input_tokens: int
+    output_tokens: int
+    prefix_blocks: tuple[int, ...]
+    block_token_sizes: tuple[int, ...]   # 最后一个 block 不一定是 512
+    affinity_key: str | None             # proxy，不能冒充 session ID
+    tenant_id: str | None                 # advanced overlay
+    service_tier: str | None              # advanced overlay
+    ttft_deadline_ms: float | None
+    tpot_deadline_ms: float | None
+</code></pre>
+<p>Block identity 使用 typed namespace，避免 trace integer ID 与 generated ID 碰撞：</p>
+<pre><code class="language-python">BlockId = TraceBlockId(value: int) | GeneratedBlockId(value: str)
+
+generated_id_j = sha256(
+    len64(&quot;generated-sha256-v1&quot;) || utf8(&quot;generated-sha256-v1&quot;)
+    || raw32(trace_sha256) || u64be(block_size_tokens) || u64be(trace_line_index)
+    || u8(parent_tag) || parent_value || u64be(generated_index)
+)
+</code></pre>
+<p><code>ContinuationPrefixBuilder</code> 负责把 <code>original_input + sent_tokens</code> 重新切成 block refs：</p>
+<ul>
+<li>trace 没有 request ID；M1 固定生成 <code>logical_request_id = &quot;trace:&quot; + trace_sha256 + &quot;:&quot; + zero_padded_line_index</code>，不能依赖随机 UUID；该 display ID 不参与 generated block hash；</li>
+<li>generated IDs 跨进程／跨 seed 稳定，不能使用 Python process-randomized <code>hash()</code>；</li>
+<li><code>parent_tag</code> 固定为 trace block／generated block／empty prefix 三种；parent value 分别编码为 <code>u64-be</code>／32-byte raw digest／空；所有字段与 3 组 golden vectors 见 <code>docs/identity-contract-v1.md</code>；</li>
+<li>第一个 generated block 正确处理 original input 的 partial tail；</li>
+<li>同一 logical request 的后续 attempt 复用同一 generated chain；不同 request 即使 output length 相同也不假设内容相同；</li>
+<li>该 schema 让 R0／R1 能通过真实 topology lookup 定价，不在 M7 临时拍 recovery ratio。</li>
+</ul>
+<p>Randomness 同样是 reproducibility contract：scenario 只给 root seed，
+<code>named-sha256-v1</code> 按稳定 consumer name 派生 selector／tie-break／cluster-view loss／eviction 子 stream。切换 selector 不能扰动 loss draws，保证 paired A／B 可比；完整 bytes 见 <code>docs/randomness-contract-v1.md</code>。</p>
+<p>硬语义：</p>
+<ul>
+<li>命中只算从 block 0 开始的 continuous prefix。</li>
+<li><code>hash_ids[i]</code> 已包含 preceding blocks 的 hash 语义，但 KV object 仍按 block 存；中间缺块后，后续 resident block 记作 stranded，不算可用命中。</li>
+<li>token hit 需要按 <code>input_length</code> 截断最后一个 partial block。</li>
+<li>logical request 与 physical attempts 分开计数。</li>
+</ul>
+<h3>2.2 NodeSnapshot</h3>
+<pre><code class="language-python">@dataclass(frozen=True)
+class NodeSnapshot:
+    node_id: str
+    alive: bool
+    cache_capacity_blocks: int
+    resident_blocks: int
+    running_requests: int
+    running_tokens: int
+    prefilling_requests: int
+    queued_uncached_tokens: int
+    available_at_ms: float
+    last_selected_ms: float
+</code></pre>
+<p>View modes：</p>
+<ul>
+<li><code>ORACLE</code>：当前 simulator 真值。</li>
+<li><code>DELAYED(delta_ms)</code>：周期上报，模拟 Turbo／FlexLB state staleness。</li>
+<li><code>LOSSY(p)</code>：部分 node 缺 cache stats，验证 fail-open。</li>
+</ul>
+<h3>2.3 五个基础接口</h3>
+<pre><code class="language-python">class PrefillNodeSelector(Protocol):
+    def select(self, request: Request, view: ClusterView) -&gt; Selection: ...
+
+class BlockEvictionPolicy(Protocol):
+    def on_lookup(self, block_id: int, now_ms: int) -&gt; None: ...
+    def admit(self, block: BlockMeta, now_ms: int) -&gt; bool: ...
+    def evict(self, required_blocks: int, now_ms: int) -&gt; list[int]: ...
+
+class CacheTopology(Protocol):
+    def lookup(self, node_id: str, request: Request) -&gt; CacheLookup: ...
+    def place(self, node_id: str, request: Request) -&gt; PlacementResult: ...
+
+class PrefillRequestProcessor(Protocol):
+    def process(self, request: Request) -&gt; PrefillResult: ...
+
+class Simulator(Protocol):
+    def run(self, trace: Iterable[Request], scenario: Scenario) -&gt; Report: ...
+</code></pre>
+<p><code>Selection</code> 必须带 decision trace：</p>
+<pre><code class="language-python">Selection(
+    node_id=&quot;p3&quot;,
+    score=812.4,
+    components={
+        &quot;local_hit_tokens&quot;: 6144,
+        &quot;queued_uncached_tokens&quot;: 4096,
+        &quot;affinity&quot;: 1,
+        &quot;eviction_cost&quot;: 12.3,
+    },
+    fallback_reason=None,
+)
+</code></pre>
+<h3>2.4 Replay mode 与 cache visibility</h3>
+<p>两种 replay 不混榜：</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>时间语义</th>
+<th>可比较策略</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>CACHE_ONLY</code></td>
+<td>严格按 arrival 顺序处理，不建 queue／service time</td>
+<td>S0／S1／S3／eviction</td>
+<td>compulsory ceiling、论文 sanity anchor</td>
+</tr>
+<tr>
+<td><code>QUEUED</code></td>
+<td>event loop 驱动 arrival／start／finish，使用 normalized service model</td>
+<td>S0-S6</td>
+<td>A1 headline、load／queue／staleness 排名</td>
+</tr>
+</tbody></table>
+<p>同一个 LRU 在两种 mode 下可以得到不同数字，因此 report key 必须包含 <code>replay_mode</code>。A1 headline 固定使用 <code>QUEUED + DELAYED</code>；<code>CACHE_ONLY</code> 只做 analyzer／论文口径 sanity，不参与 S2／S5／S6 排名。</p>
+<p>Cache visibility 显式配置：</p>
+<table>
+<thead>
+<tr>
+<th>Visibility</th>
+<th>语义</th>
+<th>默认／用途</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>INSERT_AT_COMPLETION</code></td>
+<td>prefill finish 后 block 才进入 resident set</td>
+<td>默认，保守且与 §3.4 可比</td>
+</tr>
+<tr>
+<td><code>INFLIGHT_DEDUP_WAIT</code></td>
+<td>相同 block 已在计算时，后来请求等待 producer 完成</td>
+<td>A3 sensitivity；单列 wait tokens／ms，不冒充即时 cache hit</td>
+</tr>
+</tbody></table>
+<p>inflight block 在完成前始终 pinned，不参与 eviction；producer 失败时 waiter 回到正常 lookup／compute。</p>
+<hr>
+<h2>3. Phase A：基础 selector／eviction 策略</h2>
+<h3>3.1 Selector versions</h3>
+<p>先固定 <code>LOCAL_ONLY + LRU</code>，只换 selector，避免 selector 与 eviction contribution 混在一起。</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Selector</th>
+<th>参考</th>
+<th>精确定义</th>
+<th>回答的问题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>S0</td>
+<td><code>RandomSelector</code></td>
+<td>original task</td>
+<td>alive nodes 等概率，seed 固定</td>
+<td>最低基线</td>
+</tr>
+<tr>
+<td>S1</td>
+<td><code>RoundRobinSelector</code></td>
+<td>常规均衡</td>
+<td>alive nodes 轮转</td>
+<td>仅均衡是否已经够用</td>
+</tr>
+<tr>
+<td>S2</td>
+<td><code>LeastWorkSelector</code></td>
+<td>Global Batching capacity view</td>
+<td>最小 <code>queued_uncached_tokens + running_prefill_tokens</code></td>
+<td>只看负载的收益</td>
+</tr>
+<tr>
+<td>S3</td>
+<td><code>GBPrefixBucketSelector</code></td>
+<td>CacheAware／Sticky bucket ownership</td>
+<td><code>AffinityKeyProxy → bucket → primary node</code>；soft overload 时 bounded secondary／LeastWork</td>
+<td>静态亲和的 hit／skew tradeoff</td>
+</tr>
+<tr>
+<td>S4</td>
+<td><code>SessionAffinitySelector</code></td>
+<td>StickySession</td>
+<td>已见 affinity key 优先 last node；超过 overload threshold 后 fail-open LeastWork</td>
+<td>session continuity 是否比 prefix bucket 更稳</td>
+</tr>
+<tr>
+<td>S5</td>
+<td><code>FlexLbTtftSelector</code></td>
+<td>FlexLB</td>
+<td><code>queue_ms + input_tokens - 0.7×hit_tokens</code>；top 30% similar band 内 LRU node</td>
+<td>cache＋load 统一是否优于硬 sticky</td>
+</tr>
+<tr>
+<td>S6</td>
+<td><code>CalibratedTtftSelector</code></td>
+<td>本设计 basic+</td>
+<td><code>queue_ms + prefill_ms(uncached_tokens, state)</code></td>
+<td>替掉 FlexLB 拍脑袋 0.7</td>
+</tr>
+<tr>
+<td>S7</td>
+<td><code>CacheSloSelector</code></td>
+<td>本设计 advanced</td>
+<td>在 S6 上按 normalized slack／risk 选，cache warmth 只在相似 risk band 内 tie-break</td>
+<td>SLO 是否自然化解 affinity／balance 冲突</td>
+</tr>
+</tbody></table>
+<p><code>GBPrefixBucketSelector</code> 不是逐行复制 Turbo。Turbo 是 engine pull queue，本 simulator 是 request push API；二者通过相同 bucket ownership／primary-secondary range／capacity gate 做语义等价。</p>
+<p>S3 与 S4 必须拆成两个 selector，保证 attribution；只共享两个 helper：</p>
+<pre><code class="language-text">CapacityGate
+  hard gate：真实 batch／token／prefill capacity 上限
+  soft affinity break：primary_load &gt; α × mean_eligible_load
+
+BoundedFallback
+  primary → bounded secondary candidates → LeastWork fail-open
+</code></pre>
+<p><code>α ∈ {1.10, 1.25, 1.50, 2.00}</code> 做 sensitivity。cluster mean 为 0 时不触发 soft break；hard gate 永远优先。相对 soft gate 保证 fixed-total 与 fixed-per-node sweep 下 overload 语义不漂移。</p>
+<h3>3.2 AffinityKeyProvider</h3>
+<p>trace 没有 session ID，provider 必须独立可替换：</p>
+<table>
+<thead>
+<tr>
+<th>Provider</th>
+<th>定义</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>NoneKey</code></td>
+<td>无 affinity</td>
+<td>S0／S1／S2</td>
+</tr>
+<tr>
+<td><code>PrefixAnchor(k)</code></td>
+<td>第 <code>k</code> 个 prefix hash；不足 k 取最后一个</td>
+<td>S3 sanity baseline</td>
+</tr>
+<tr>
+<td><code>OnlineConversationLinker</code></td>
+<td>严格只看历史：时间窗内最长公共 prefix 超阈值则继承 family ID</td>
+<td>S4 主实验</td>
+</tr>
+<tr>
+<td><code>RealSessionKey</code></td>
+<td>未来有真实 session 字段时注入</td>
+<td>production replay</td>
+</tr>
+</tbody></table>
+<p>必须扫 <code>k ∈ {1,2,4,8,12,16}</code>、link TTL、minimum shared blocks。不能挑一个最好看的 k 当最终结果。</p>
+<p><code>OnlineConversationLinker</code> 额外满足：</p>
+<ul>
+<li>hot-block exclusion：超过 hotness percentile／fanout threshold 的共同 prefix 不建立 family；</li>
+<li>family size cap：超过上限后停止吸附，避免 shared system prompt 形成巨型假 session；</li>
+<li>所有 linkage decision 记录当时可见历史，不允许离线回看 future request；</li>
+<li>预期 S4 与 S5 的 hit 接近，主要比较 skew、fallback 和 stale-view stability，而不是强求 hit 拉开。</li>
+</ul>
+<h3>3.3 Eviction versions</h3>
+<p>Selector sweep 后固定 Top-2 selector，再换 eviction：</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Policy</th>
+<th>定义</th>
+<th>目的</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>E0</td>
+<td>FIFO</td>
+<td>首次 insert 顺序淘汰，hit 不刷新</td>
+<td>original task 基线</td>
+</tr>
+<tr>
+<td>E1</td>
+<td>LRU</td>
+<td>hit／request compute 后刷新</td>
+<td>Mooncake trace 论文基线</td>
+</tr>
+<tr>
+<td>E2</td>
+<td>SLRU</td>
+<td>probation＋protected 两段</td>
+<td>防 scan pollution</td>
+</tr>
+<tr>
+<td>E3</td>
+<td>SecondHitAdmission＋LRU</td>
+<td>ghost 首见；第二次才进入 protected cache</td>
+<td>验证 78%+ one-hit block 的 pollution</td>
+</tr>
+<tr>
+<td>E4</td>
+<td>ChainAwareValue</td>
+<td><code>reuse_prob × recompute_cost ÷ replicas</code>，同时计 stranded descendants</td>
+<td>advanced，只在 E0-E3 出数后做</td>
+</tr>
+</tbody></table>
+<p>约束：</p>
+<ul>
+<li>inflight／pinned block 不可淘汰。</li>
+<li>请求大于 node capacity：允许 streaming compute，但最终只留下 eviction policy 接受的 suffix／hot blocks；行为必须显式记录。</li>
+<li>eviction 后又在 reuse window 内访问，计 <code>eviction_regret</code>。</li>
+<li>早期 block 被逐导致后续 resident blocks 不可用，计 <code>stranded_block_time</code>。</li>
+</ul>
+<h2>5. Phase B：KVS-aware CacheTopology</h2>
+<h3>5.1 三种 topology</h3>
+<pre><code class="language-text">LOCAL_ONLY
+  P.HBM miss → recompute
+
+SHARED_KVS
+  P.HBM miss → shared KVS hit → remote KVT → recompute remainder
+
+HYBRID
+  local HBM → local DRAM／v6d → remote DRAM／KVS → recompute
+</code></pre>
+<p>统一 lookup result：</p>
+<pre><code class="language-python">CacheLookup(
+    local_hit_tokens=4096,
+    local_dram_hit_tokens=1024,
+    remote_hit_tokens=2048,
+    recompute_tokens=1421,
+    transfer_bytes=...,
+    source_segments=[...],
+)
+</code></pre>
+<h3>5.2 CPU simulation 不跑真实 KVT</h3>
+<p>参数化：</p>
+<pre><code class="language-text">kvt_ms(bytes) = fixed_latency_ms + bytes / effective_bandwidth
+effective_cost = max(non_overlapped_kvt_ms, recompute_ms)
+</code></pre>
+<p>扫：</p>
+<ul>
+<li>bandwidth：25／50／100／200 Gbps；</li>
+<li>fixed latency；</li>
+<li>layer-wise overlap：0%／50%／90%；</li>
+<li>local／remote capacity；</li>
+<li>KVS lookup timeout／unknown rate；</li>
+<li>hot block replica factor。</li>
+</ul>
+<p>只有当策略排序对这些参数敏感，才借 GPU／RDMA 机器校准。cache policy 本身不需要 GPU。</p>
+<h3>5.3 KVS 改变 selector 的目标</h3>
+<p><code>LOCAL_ONLY</code>：选错 P 就 miss。<br><code>SHARED_KVS</code>：选错 P 仍可 remote hit，但会付 KVT／hotspot cost。</p>
+<p>因此 S6 扩展成：</p>
+<pre><code class="language-text">plan_cost(P)
+  = queue_ms(P)
+  + min(local_compute_plan, remote_fetch_plan)
+  + eviction_externality(P)
+</code></pre>
+<p>不要直接把 remote hit 当 local hit。二者必须分账。</p>
+<p>Phase B 增加具名对照 <code>S6-KVS／MooncakeAlgo1</code>：</p>
+<pre><code class="language-text">best_prefix_len, best_holder = FindBestPrefixMatch(...)
+
+for each candidate P with local prefix_len:
+  if best_prefix_len / prefix_len &lt; kvcache_balancing_threshold:
+    cost(P) = queue(P) + prefill(full_len, prefix_len)
+  else:
+    transfer_len = best_prefix_len - prefix_len
+    cost(P) = transfer(P, best_holder, transfer_len)
+              + queue(P)
+              + prefill(full_len, best_prefix_len)
+
+select P with minimum predicted TTFT
+</code></pre>
+<p>零 prefix 的除法按显式 sentinel／branch 处理，不能依赖浮点无穷。以上复刻自 Mooncake Algorithm 1 第 4～23 行；还要单列第 28～30 行触发的 hot-spot migration。记录 <code>kvcache_balancing_threshold</code> sensitivity。该配置用于与论文直接对话；calibrated S6 可以扩展它，但不能取代这个复刻锚点。</p>
+<hr>
+<h2>6. Phase C：SLO-aware RequestLifecyclePlanner</h2>
+<h3>6.1 新 interface，不污染 selector</h3>
+<pre><code class="language-python">class RequestLifecyclePlanner(Protocol):
+    def prepare(self, request, cluster_view) -&gt; ExecutionPlan: ...
+    def on_prefill_probe(self, plan, p_probe) -&gt; LifecycleAction: ...
+    def on_decode_probe(self, plan, d_probe) -&gt; LifecycleAction: ...
+    def on_decode_checkpoint(self, plan, checkpoint) -&gt; LifecycleAction: ...
+</code></pre>
+<pre><code class="language-python">class LifecycleAction(Enum):
+    HOLD = auto()
+    SELECT_P = auto()
+    SELECT_D = auto()
+    COMMIT_P = auto()
+    ROLLBACK_P = auto()
+    CONTINUE_D = auto()
+    RESCHEDULE_D = auto()
+    REJECT = auto()
+    TERMINAL_FAIL = auto()
+</code></pre>
+<h3>6.2 Protocol implementations</h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Protocol</th>
+<th>时序</th>
+<th>主要成本</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>P0</td>
+<td>PD</td>
+<td>P compute → 选 D</td>
+<td>D 无位时可能浪费 P</td>
+</tr>
+<tr>
+<td>P1</td>
+<td>DP</td>
+<td>reserve D → P compute</td>
+<td>D hold／idle</td>
+</tr>
+<tr>
+<td>P2</td>
+<td>gated-PD</td>
+<td>P PREPARE probe → 判 → D RESERVE → P COMMIT</td>
+<td>probe＋pending ledger</td>
+</tr>
+<tr>
+<td>P3</td>
+<td>gated-DP</td>
+<td>D capacity probe／soft lease → P PREPARE／COMMIT</td>
+<td>soft lease staleness／hold</td>
+</tr>
+<tr>
+<td>P4</td>
+<td>KVS decoupled</td>
+<td>P-now → KV in Store → D-later</td>
+<td>Store occupancy＋D pull latency</td>
+</tr>
+</tbody></table>
+<p>所有 protocol 使用相同 selector／topology／workload，避免架构名词对比变成不同输入对比。</p>
+<h3>6.3 SLO model</h3>
+<p>Trace 没 tier。提供两种模式：</p>
+<ol>
+<li><code>RelativeSloOverlay</code>：对齐 Mooncake paper 思路，TTFT／TBT 相对 isolated latency 的倍数。</li>
+<li><code>TieredSloOverlay</code>：strict／standard／relaxed，比例和 deadline 全在 config，8 seeds sensitivity。</li>
+</ol>
+<p>每个 request 维护：</p>
+<pre><code class="language-text">ttft_slack = ttft_deadline - predicted_ttft
+tpot_slack = tpot_deadline - predicted_tpot
+completion_slack = completion_deadline - predicted_completion
+</code></pre>
+<p>Cache warmth 只在相似 risk band 内作为 tie-break。不能让 cold request 永久没机会。</p>
+<p>Phase C+ 同时输出：</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>定义</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>strict_completed_goodput</code></td>
+<td>完成且满足该请求全部 SLO 的 useful tokens／wall time</td>
+<td>主指标</td>
+</tr>
+<tr>
+<td><code>lenient_completed_goodput</code></td>
+<td>所有完整完成请求的 useful tokens／wall time</td>
+<td>cliff／边界行为审计</td>
+</tr>
+<tr>
+<td><code>partial_output_tokens</code></td>
+<td>未完成请求已 emit 的 tokens</td>
+<td>单列，不计 goodput</td>
+</tr>
+</tbody></table>
+<p>若 policy search 需要 scalar，<code>tier_weight</code>、<code>λ_gpu</code>、<code>λ_stall</code>、<code>λ_risk</code> 全部进入 report provenance，并至少做 one-at-a-time sensitivity。</p>
+<hr>
+<h2>7. Phase D：Decode lease／preemption</h2>
+<h3>7.1 为什么 client 有这个位置</h3>
+<p>LLMClientV1 同时拥有：</p>
+<ul>
+<li>logical request identity；</li>
+<li>P／D 两条独立 stream；</li>
+<li>已 emit tokens；</li>
+<li>retry／continuation；</li>
+<li>SLO／priority；</li>
+<li>P probe、D probe、KVS estimate；</li>
+<li>next attempt 的路由入口。</li>
+</ul>
+<p>Engine 适合做 token scheduling 和 local preemption；Turbo／FlexLB 适合选 instance；只有 client 能把“当前 D 不值得继续”转换成“带 checkpoint 的另一次 D attempt”，并保证用户 output 不重复。</p>
+<h3>7.2 不做“谁低优就杀谁”</h3>
+<p>每个 Decode checkpoint 比较两个 plan：</p>
+<pre><code class="language-text">Keep(r, d)
+  = completion_value(r) × P(按 SLO 完成 | keep)
+  - λ_gpu × remaining_decode_gpu_ms(r, d)
+  - λ_interference × interference_gpu_ms(r, d)
+
+Move(r, d→d2)
+  = completion_value(r) × P(按 SLO 完成 | move)
+  - λ_gpu × [checkpoint_gpu_ms(r) + re_prefill_or_kvt_gpu_ms(r)]
+  - λ_stall × migration_stall_ms(r)
+  - λ_risk × duplicate_risk(r)
+
+Preempt only if Move - Keep &gt; safety_margin
+</code></pre>
+<p>所有项先映射到同一个 normalized utility 尺度；<code>λ_*</code> 由离线 replay 或 shadow telemetry 标定，不能直接把“价值”和“毫秒”裸相减。<code>completion_value</code> 由 tier／tenant weight／aging 组成，但必须有 admission-time snapshot，防止请求执行中被任意改 priority。</p>
+<h3>7.3 Fairness invariants</h3>
+<table>
+<thead>
+<tr>
+<th>Invariant</th>
+<th>规则</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>F1 Minimum quantum</td>
+<td>每次获得 D 后至少执行 <code>min_tokens</code> 或 <code>min_ms</code>，除非故障／硬 overload</td>
+</tr>
+<tr>
+<td>F2 Bounded preemption</td>
+<td>每个 logical request 最多 <code>max_preemptions</code>；到顶后 continue 或 terminal，不无限搬</td>
+</tr>
+<tr>
+<td>F3 Aging</td>
+<td>wait／stall 越久，virtual priority 单调上升</td>
+</tr>
+<tr>
+<td>F4 Service fairness</td>
+<td>用 <code>served_decode_ms / tenant_weight</code> 或 served tokens 的 virtual runtime 排序</td>
+</tr>
+<tr>
+<td>F5 Cache tie-break only</td>
+<td>cache warmth 只在同 tier／相似 slack band 内加分</td>
+</tr>
+<tr>
+<td>F6 No duplicate output</td>
+<td>epoch＋output_seq fence；旧 attempt late frame drop</td>
+</tr>
+<tr>
+<td>F7 Grant conservation</td>
+<td>retry／resched／hedge 用 allocation grant，不共改易丢的 counter</td>
+</tr>
+<tr>
+<td>F8 Fail-open boundary</td>
+<td>planner state unavailable 时回到 D1 fixed lease／现状，不 hard abort</td>
+</tr>
+</tbody></table>
+<p>需要同时报：</p>
+<ul>
+<li>Jain fairness index；</li>
+<li>per-tier completion ratio；</li>
+<li>per-tenant normalized attained service；</li>
+<li>max wait／max stall；</li>
+<li>preemptions per completed request；</li>
+<li>被连续 preempt ≥2 次的 request 比例。</li>
+</ul>
+<h3>7.4 D1 → D2 的落地阶梯</h3>
+<h4>D1 Fixed token lease，先模拟已有机制</h4>
+<ul>
+<li>每个 D attempt cap=<code>min(remaining_budget, lease_tokens)</code>。</li>
+<li>lease 到期自然 <code>LENGTH</code>。</li>
+<li>client 不向用户 emit 中间 <code>LENGTH</code>。</li>
+<li>continuation input=<code>original_input + sent_tokens</code>。</li>
+<li>resched 不消耗 fault retry budget、不带 cache penalty header、无 backoff。</li>
+<li><code>max_rounds</code> 到顶后最后一次放开。</li>
+</ul>
+<h4>D1.5 Adaptive lease，不主动 abort</h4>
+<p>每次发 D 前决定下一 lease：</p>
+<pre><code class="language-text">lease_tokens
+  = clamp(base_lease
+          × slo_slack_factor
+          × fairness_debt_factor
+          × cache_recovery_factor,
+          min_lease,
+          max_lease)
+</code></pre>
+<ul>
+<li>tight SLO／已经多次 stall → lease 变长。</li>
+<li>新来的 high utility request 多、当前 request slack 宽 → lease 变短。</li>
+<li>recovery cost 高／无 KVS checkpoint → lease 变长，减少搬迁。</li>
+</ul>
+<h4>D2 Cooperative preemption</h4>
+<p>只有到固定 checkpoint 才允许 <code>abort_self</code>：</p>
+<ol>
+<li>D 上报 checkpoint／progress／TPOT／KV handle。</li>
+<li>client 计算 Keep／Move。</li>
+<li>决定 Move 时，先创建新 epoch／grant。</li>
+<li>旧 D 收 <code>abort_self(epoch)</code>，停止后确认 terminal checkpoint。</li>
+<li>新 D 从 checkpoint resume；无法 resume 则走 continuation recompute。</li>
+<li>output authority 仍在 client，按 seq fence emit。</li>
+</ol>
+<h3>7.5 KVS 是 D2 的经济基础，但不是自动成立</h3>
+<p>当前 continuation 能把已 emit tokens 拼回 prompt，但不等于 decode 产生的 KV 已存在 global KVS。</p>
+<p>必须分三档验证：</p>
+<table>
+<thead>
+<tr>
+<th>Recovery</th>
+<th>需要什么</th>
+<th>成本</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>R0 Recompute continuation</td>
+<td>现有 client continuation</td>
+<td>重新 prefill 全 context，可能被 prefix cache 命中</td>
+</tr>
+<tr>
+<td>R1 Prefix-KVS assisted</td>
+<td>exact continuation prefix 已进 KVS</td>
+<td>remote load＋小段 recompute</td>
+</tr>
+<tr>
+<td>R2 Decode checkpoint handle</td>
+<td>D 定期把 KV checkpoint 放可跨实例读的 store</td>
+<td>最低重算，但要 store lifecycle／fence</td>
+</tr>
+</tbody></table>
+<p>如果只有 R0，频繁 abort 很可能让 throughput 更差。D2 开工 gate：R0／R1 recovery cost 的 p95 必须先量出来。</p>
+<hr>
+</section>
+<section id="eval" class="section"><h2>3. 关键技术评估</h2><div class="note">下表中的数字是 trace sanity check，不是最终 benchmark。它只用于验证实验矩阵有信号，不能直接代表生产命中率或 GPU 收益。</div><h3>3.4 Provisional trace sanity，不是最终实验</h3>
+<p>下面只用于验证 simulator 方向。临时 read-only script：continuous-prefix lookup、partial last block、request 完成后全 block resident、LRU；没有 queue／service time。</p>
+<p>固定<strong>集群总容量</strong>，N 增大时 per-node capacity=<code>total/N</code>。下表单位统一为 <strong>continuous-prefix token-weighted hit rate</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>N／selector</th>
+<th align="right">1k</th>
+<th align="right">10k</th>
+<th align="right">30k</th>
+<th align="right">50k</th>
+<th align="right">100k</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1 node＋LRU</td>
+<td align="right">35.18%</td>
+<td align="right">47.56%</td>
+<td align="right">55.46%</td>
+<td align="right">56.91%</td>
+<td align="right">57.04%</td>
+</tr>
+<tr>
+<td>4 Random＋LRU</td>
+<td align="right">34.32%</td>
+<td align="right">38.35%</td>
+<td align="right">42.10%</td>
+<td align="right">43.96%</td>
+<td align="right">45.01%</td>
+</tr>
+<tr>
+<td>4 PrefixAnchor(2)＋LRU</td>
+<td align="right">35.15%</td>
+<td align="right">47.47%</td>
+<td align="right">55.44%</td>
+<td align="right">56.92%</td>
+<td align="right">57.02%</td>
+</tr>
+<tr>
+<td>8 Random＋LRU</td>
+<td align="right">31.97%</td>
+<td align="right">36.57%</td>
+<td align="right">38.85%</td>
+<td align="right">39.95%</td>
+<td align="right">40.94%</td>
+</tr>
+<tr>
+<td>8 PrefixAnchor(2)＋LRU</td>
+<td align="right">34.99%</td>
+<td align="right">47.09%</td>
+<td align="right">55.45%</td>
+<td align="right">56.88%</td>
+<td align="right">57.04%</td>
+</tr>
+</tbody></table>
+<p>关键观察：</p>
+<ol>
+<li>Random 把相同 prefix 打散，8 nodes／50k 总容量损失约 17pp。</li>
+<li>PrefixAnchor(2) 几乎恢复 token-weighted infinite ceiling <code>57.070%</code>，但负载很歪：8 nodes request max／mean=<code>3.55×</code>，input token max／mean=<code>2.98×</code>。</li>
+<li>这正是 FlexLB／S6 要回答的 tradeoff：不要只看 hit，也不要只看 balance。</li>
+<li><code>PrefixAnchor(1)</code> 受超热共同首块影响，8 nodes／50k 只有 43.73%；anchor choice 不能写死。</li>
+</ol>
+<p>最终实现必须用 versioned config 重跑，同时输出 block-ref 与 token-weighted 两张表；以上数字不作为正式结论。</p>
+<hr>
+<h2>4. Phase A experiment matrix</h2>
+<h3>4.1 两种 capacity sweep</h3>
+<p>必须同时跑：</p>
+<ol>
+<li><strong>Fixed total capacity</strong>：隔离 routing fragmentation／replication cost。</li>
+<li><strong>Fixed per-node capacity</strong>：模拟真实 scale-out 后 aggregate cache 增长。</li>
+</ol>
+<p>参数：</p>
+<pre><code class="language-text">N                    = 1, 2, 4, 8, 16
+total cache blocks   = 1k, 10k, 30k, 50k, 100k
+per-node blocks      = 1k, 5k, 10k, 30k
+view delay           = 0, 100ms, 1s, 5s, 10s
+replay speed         = 1×, 2×, 4×
+replay mode          = CACHE_ONLY, QUEUED
+cache visibility     = INSERT_AT_COMPLETION, INFLIGHT_DEDUP_WAIT
+affinity soft α      = 1.10, 1.25, 1.50, 2.00
+seed                 = 713..720
+</code></pre>
+<p>基础 cache-only policy 是 deterministic 时 seed 只影响 Random／tie-break；advanced overlay 必须全 8 seeds。</p>
+<p>Headline realism 默认 <code>DELAYED</code>，<code>ORACLE</code> 仅作为 upper bound，<code>LOSSY</code> 用于 fail-open robustness。不得用 ORACLE 主榜夸大 S5／S6 优势。</p>
+<h3>4.2 三轮实验，禁止全笛卡尔积</h3>
+<table>
+<thead>
+<tr>
+<th>Round</th>
+<th>固定</th>
+<th>扫描</th>
+<th>产出</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A1 selector</td>
+<td><code>LOCAL_ONLY + LRU + QUEUED + DELAYED</code></td>
+<td>S0-S6</td>
+<td>hit／load／queue Pareto＋replica mechanism</td>
+</tr>
+<tr>
+<td>A2 eviction</td>
+<td>A1 Top-2 selector</td>
+<td>E0-E3</td>
+<td>admission／eviction contribution</td>
+</tr>
+<tr>
+<td>A3 combine</td>
+<td>Top-3 combinations</td>
+<td>capacity／N／staleness／visibility</td>
+<td>final baseline frontier</td>
+</tr>
+</tbody></table>
+<h3>4.3 Phase A metrics</h3>
+<table>
+<thead>
+<tr>
+<th>类别</th>
+<th>指标</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Cache</td>
+<td>token-weighted hit、block-ref hit、各自 ceiling attainment、unique resident、replica factor</td>
+</tr>
+<tr>
+<td>Load</td>
+<td>requests／tokens／uncached tokens per node、max／mean、CV、Gini</td>
+</tr>
+<tr>
+<td>Queue</td>
+<td>estimated queue ms p50／p95／p99、head-of-line wait</td>
+</tr>
+<tr>
+<td>Eviction</td>
+<td>eviction count、regret、one-hit pollution、stranded block time</td>
+</tr>
+<tr>
+<td>Decision</td>
+<td>affinity kept／broken、fallback count、no-stat fallback、score components</td>
+</tr>
+</tbody></table>
+<p>Phase A stop gate：</p>
+<ul>
+<li>同配置可重复；</li>
+<li>invariant tests 全绿；</li>
+<li>one-node infinite／large-capacity ceiling 与 independent analyzer 对齐；</li>
+<li>A1 能复现“hard affinity hit 高但 skew 高”；</li>
+<li>A1 用 replica factor 解释 Random fragmentation／PrefixAnchor 去重机制，不只报告 outcome；</li>
+<li>不引入 synthetic SLO 就不报告 SLO gain。</li>
+</ul>
+<hr>
+</section>
+<section id="risk" class="section"><h2>4. 风险与备选</h2><h2>8. Advanced simulation scenarios</h2>
+<h3>8.1 WorkloadOverlay</h3>
+<p>保持 Mooncake arrival／input／output／hash 不变，只叠 synthetic fields：</p>
+<pre><code class="language-python">WorkloadOverlay(
+    tenant_distribution=...,
+    tier_distribution=...,
+    deadline_model=...,
+    decode_slowdown_noise=...,
+)
+</code></pre>
+<p>RNG stream 分开：</p>
+<ul>
+<li>trace／routing；</li>
+<li>tenant／tier；</li>
+<li>service time noise；</li>
+<li>fault；</li>
+<li>policy tie-break。</li>
+</ul>
+<p>Baseline 与 candidate 共用相同 seeds 713～720。</p>
+<h3>8.2 对照组</h3>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th>Selector</th>
+<th>Protocol</th>
+<th>Decode policy</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>B0</td>
+<td>Random</td>
+<td>PD</td>
+<td>no lease</td>
+</tr>
+<tr>
+<td>B1</td>
+<td>GBPrefixBucket</td>
+<td>PD</td>
+<td>no lease</td>
+</tr>
+<tr>
+<td>B2</td>
+<td>FlexLB</td>
+<td>PD</td>
+<td>no lease</td>
+</tr>
+<tr>
+<td>B3</td>
+<td>CalibratedTTFT</td>
+<td>gated-PD</td>
+<td>no lease</td>
+</tr>
+<tr>
+<td>B4</td>
+<td>CacheSLO</td>
+<td>gated-PD</td>
+<td>fixed lease D1</td>
+</tr>
+<tr>
+<td>B5</td>
+<td>CacheSLO</td>
+<td>gated-PD</td>
+<td>adaptive lease D1.5</td>
+</tr>
+<tr>
+<td>B6</td>
+<td>CacheSLO</td>
+<td>gated-PD</td>
+<td>cooperative preemption D2</td>
+</tr>
+<tr>
+<td>Aggressive control</td>
+<td>priority victim</td>
+<td>PD</td>
+<td>autoTPM-like abort／fresh retry</td>
+</tr>
+</tbody></table>
+<p>Aggressive control 是为了测 wasted compute／low starvation，不作为推荐 production policy。</p>
+<h3>8.3 决策门</h3>
+<table>
+<thead>
+<tr>
+<th>Gate</th>
+<th>通过条件</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>G-A</td>
+<td>selector Pareto 优于 Random／RR，且不是只靠 load skew 换 hit</td>
+</tr>
+<tr>
+<td>G-B</td>
+<td>KVS-aware 结果在合理 bandwidth sensitivity 下稳定</td>
+</tr>
+<tr>
+<td>G-C</td>
+<td>TTFT prediction 排序稳定；校准前只报 normalized work，不报 ms 真值</td>
+</tr>
+<tr>
+<td>G-D1</td>
+<td>fixed lease 提升 completed goodput，p95 migration stall 可接受</td>
+</tr>
+<tr>
+<td>G-D2</td>
+<td>cooperative preemption 相对 D1 仍有稳定增益；p99 stall、waste、最低 tier completion 不劣化；<code>preemptions_per_completed_request</code> 不超过硬上限</td>
+</tr>
+<tr>
+<td>G-Prod</td>
+<td>simulation 排名在 GPU replay 中一致，不要求绝对值完全相等</td>
+</tr>
+</tbody></table>
+<hr>
+</section>
+<section id="rollout" class="section"><h2>5. Rollout</h2><h2>9. Detail todolist</h2>
+<h3>M0｜Review freeze</h3>
+<ul>
+<li><input checked="" disabled="" type="checkbox"> 接受 <code>CacheTopology × ExecutionProtocol</code>，同时加入 validity matrix 和三个显式 coupling。</li>
+<li><input checked="" disabled="" type="checkbox"> S3／S4 拆开；共享 <code>CapacityGate</code>／<code>BoundedFallback</code> helper。</li>
+<li><input checked="" disabled="" type="checkbox"> 接受严格 online 的 <code>AffinityKeyProxy</code>；加入 hot-block exclusion 和 family size cap。</li>
+<li><input checked="" disabled="" type="checkbox"> FlexLB v1 先严格复刻，再实现 calibrated v2。</li>
+<li><input checked="" disabled="" type="checkbox"> Phase A 先固定 LRU 排 selector，再扫 Top-2 eviction。</li>
+<li><input checked="" disabled="" type="checkbox"> D1／D1.5 是 advanced implementation ceiling；D2 只做 gated spike，不直接实现 arbitrary abort。</li>
+<li><input checked="" disabled="" type="checkbox"> Phase C+ 主报 strict completed goodput，lenient／partial 单列；Phase A 不报 goodput。</li>
+<li><input checked="" disabled="" type="checkbox"> 第一期 fairness 使用 tenant-weighted virtual runtime，不把 quota／TPM ledger 塞进 overlay。</li>
+<li><input checked="" disabled="" type="checkbox"> R2 Decode checkpoint store 独立于 Mooncake prefix Store。</li>
+<li><input checked="" disabled="" type="checkbox"> 文档归属：<code>DESIGN.md</code> v2 保留 concept／insight；<code>DESIGN-v3</code> 是 build spec，互相引用、不合并。</li>
+<li><input checked="" disabled="" type="checkbox"> 张珮文确认本轮修订。</li>
+<li><input checked="" disabled="" type="checkbox"> <code>scenario.schema.json</code> 1.0.0 冻结为 strict Phase A-only；B–D 配置留在 design example，进入新 phase 时升 major。</li>
+<li><input checked="" disabled="" type="checkbox"> 把 G1 metric unit、G2 synthetic ID、G3 visibility、G4 replay mode 固化到 <code>scenario.schema.json</code>。</li>
+<li><input checked="" disabled="" type="checkbox"> G2 使用 byte-exact <code>generated-sha256-v1</code>，覆盖 trace parent／generated parent／empty prefix 三组 golden vectors。</li>
+<li><input checked="" disabled="" type="checkbox"> 固化 schema version policy、exact-file-byte config SHA 和 M1 runtime validation 清单。</li>
+</ul>
+<p>交付：review resolution＋冻结的 <code>scenario.schema.json</code>。schema 未冻结前不进入 M1 implementation。</p>
+<h3>M1｜Trace analyzer／provenance</h3>
+<ul>
+<li><input checked="" disabled="" type="checkbox"> 建 package skeleton、config loader、deterministic named-stream seed manager。</li>
+<li><input checked="" disabled="" type="checkbox"> parse／validate 四字段，校验 hash chain length 与 input length。</li>
+<li><input checked="" disabled="" type="checkbox"> 正确计算 partial last block。</li>
+<li><input checked="" disabled="" type="checkbox"> 输出 request／block／reuse-distance／hotness／prefix-family stats（anchor depth 1–4）。</li>
+<li><input checked="" disabled="" type="checkbox"> 输出 trace SHA、exact-byte config SHA、git SHA＋dirty state 到 report。</li>
+<li><input checked="" disabled="" type="checkbox"> independent analyzer 分别计算 block-ref <code>55.2550836%</code> 与 token-weighted <code>57.0700233%</code> ceiling。</li>
+<li><input checked="" disabled="" type="checkbox"> 定义 typed <code>TraceBlockId／GeneratedBlockId</code> 并实现已冻结的 deterministic <code>generated-sha256-v1</code> hash contract。</li>
+<li><input checked="" disabled="" type="checkbox"> 从 trace SHA＋line index 生成 stable logical request ID。</li>
+<li><input checked="" disabled="" type="checkbox"> 核对 Mooncake Table 1：论文只称 cache hit ratio，未完整给 denominator／insertion timing；保留 <code>Inf=0.51</code> 为 paper reference，不与两种 ceiling 强行等同。</li>
+<li><input checked="" disabled="" type="checkbox"> 一次 streaming read＋紧凑 <code>array(&quot;Q&quot;)</code> block storage；23.6k requests 不引入分布式并行框架。</li>
+</ul>
+<p>Tests：空 trace、坏 JSON、重复 timestamp、短于一 block、partial block、超长 request。</p>
+<h3>M2｜Core interfaces／LOCAL_ONLY</h3>
+<ul>
+<li><input disabled="" type="checkbox"> <code>Request</code>／<code>NodeSnapshot</code>／<code>ClusterView</code>／<code>Selection</code>。</li>
+<li><input disabled="" type="checkbox"> <code>PrefillNodeSelector</code>／<code>BlockEvictionPolicy</code>／<code>CacheTopology</code>／<code>PrefillRequestProcessor</code>。</li>
+<li><input disabled="" type="checkbox"> <code>ContinuationPrefixBuilder</code>，覆盖 partial input tail 与 generated chain。</li>
+<li><input disabled="" type="checkbox"> continuous-prefix lookup。</li>
+<li><input disabled="" type="checkbox"> pinned block／placement／eviction／stranded accounting。</li>
+<li><input disabled="" type="checkbox"> <code>CACHE_ONLY／QUEUED</code> 两种 replay mode；event loop 用 heap 管 arrival、prefill start／finish、cache insert／evict。</li>
+<li><input disabled="" type="checkbox"> <code>INSERT_AT_COMPLETION／INFLIGHT_DEDUP_WAIT</code> visibility；默认前者。</li>
+<li><input disabled="" type="checkbox"> <code>ORACLE</code>／<code>DELAYED</code>／<code>LOSSY</code> view。</li>
+</ul>
+<p>Invariant tests：capacity 不超；pinned 不驱逐；hit 不越过首 miss；logical／attempt token 不重复计。</p>
+<h3>M3｜Baseline selectors／eviction</h3>
+<ul>
+<li><input disabled="" type="checkbox"> S0 Random、S1 RR、S2 LeastWork。</li>
+<li><input disabled="" type="checkbox"> 共用 <code>CapacityGate</code>：hard capacity＋<code>primary_load &gt; α×cluster_mean</code> soft break。</li>
+<li><input disabled="" type="checkbox"> 共用 <code>BoundedFallback</code>：primary／secondary range＋LeastWork fail-open。</li>
+<li><input disabled="" type="checkbox"> S3 GBPrefixBucket：静态 prefix ownership 薄壳。</li>
+<li><input disabled="" type="checkbox"> S4 SessionAffinity：online linker＋hot-block exclusion＋family cap 薄壳。</li>
+<li><input disabled="" type="checkbox"> S5 FlexLB：公式 v1＋top30／similar band／last-selected fairness。</li>
+<li><input disabled="" type="checkbox"> S6 CalibratedTTFT：先用 normalized work model。</li>
+<li><input disabled="" type="checkbox"> E0 FIFO、E1 LRU、E2 SLRU、E3 SecondHitAdmission。</li>
+<li><input disabled="" type="checkbox"> 每次 selection 保留 component trace，可按 request sample debug。</li>
+</ul>
+<p>交付：A1／A2／A3 CSV＋图＋策略排名；CSV schema 从这里稳定，含 trace／config／git SHA、metric unit、replay mode、view mode、visibility；明确 fixed-total 与 fixed-per-node。</p>
+<h3>M4｜Base result review</h3>
+<ul>
+<li><input disabled="" type="checkbox"> 验证 PrefixAnchor sensitivity，禁止只留 k=2。</li>
+<li><input disabled="" type="checkbox"> 检查 hit gain 是否由单节点 overload 换来。</li>
+<li><input disabled="" type="checkbox"> 检查 SessionAffinity proxy 是否把 shared system prompt 错当 session，验证 hot-block exclusion／family cap。</li>
+<li><input disabled="" type="checkbox"> 预期 S4／S5 hit 接近；重点比较 skew、fallback、stale-view stability，不能以“hit 没拉开”判失败。</li>
+<li><input disabled="" type="checkbox"> A1 用 replica factor 解释 Random fragmentation 和 affinity 去重机制。</li>
+<li><input disabled="" type="checkbox"> 对 Top-3 做 8-seed／stale-view replay。</li>
+<li><input disabled="" type="checkbox"> 选择进入 KVS phase 的 2 个 selector。</li>
+</ul>
+<p>Stop：如果 S5／S6 相对简单 S3 没有 Pareto 增益，不进入复杂 selector implementation。</p>
+<p>M1–M4 作为独立可交付：S0／S1／S2＋FIFO／LRU＋正式 hit report 已完整回答 original task，不等待后续 KVS／SLO phase。</p>
+<h3>M5｜KVS topology</h3>
+<ul>
+<li><input disabled="" type="checkbox"> <code>SHARED_KVS</code>／<code>HYBRID</code> lookup／placement。</li>
+<li><input disabled="" type="checkbox"> local／remote／recompute 分账。</li>
+<li><input disabled="" type="checkbox"> 参数化 KVT fixed latency／bandwidth／overlap。</li>
+<li><input disabled="" type="checkbox"> remote store capacity／replica／eviction。</li>
+<li><input disabled="" type="checkbox"> KVS timeout／unknown fail-open。</li>
+<li><input disabled="" type="checkbox"> hot block transfer hotspot metric。</li>
+<li><input disabled="" type="checkbox"> <code>S6-KVS／MooncakeAlgo1</code> 严格复刻＋<code>kvcache_balancing_threshold</code> sensitivity。</li>
+</ul>
+<p>交付：bandwidth／capacity sensitivity；回答“要不要借 GPU 量 KVT”。</p>
+<h3>M6｜Time／SLO model</h3>
+<ul>
+<li><input disabled="" type="checkbox"> normalized service model：uncached prefill work、decode token work。</li>
+<li><input disabled="" type="checkbox"> <code>RelativeSloOverlay</code>。</li>
+<li><input disabled="" type="checkbox"> <code>TieredSloOverlay</code>＋tenant overlay＋独立 RNG streams。</li>
+<li><input disabled="" type="checkbox"> PD／DP／gated-PD／gated-DP lifecycle state machine。</li>
+<li><input disabled="" type="checkbox"> hold／reserve／commit／rollback／reject／waste accounting。</li>
+<li><input disabled="" type="checkbox"> strict／lenient completed goodput、partial output、SLO、fairness metrics。</li>
+<li><input disabled="" type="checkbox"> scalar 权重进入 provenance，并做 sensitivity。</li>
+</ul>
+<p>交付：同一 selector 下四 protocol Pareto；不使用未经校准的“真实 ms”措辞。</p>
+<h3>M7｜Decode lease simulation</h3>
+<ul>
+<li><input disabled="" type="checkbox"> D0 no lease。</li>
+<li><input disabled="" type="checkbox"> D1 fixed lease，复现当前 <code>8／8／14</code>、max-round、kill-switch、failure downgrade invariants。</li>
+<li><input disabled="" type="checkbox"> R0 continuation 通过 <code>ContinuationPrefixBuilder</code>＋topology lookup 计算 recompute cost。</li>
+<li><input disabled="" type="checkbox"> R1 exact generated prefix 通过同一 synthetic block chain 计算 KVS-assisted cost。</li>
+<li><input disabled="" type="checkbox"> D1.5 adaptive lease，只在 attempt boundary 调整。</li>
+<li><input disabled="" type="checkbox"> fairness debt／minimum quantum／bounded preemption。</li>
+</ul>
+<p>交付：D0／D1／D1.5 completed goodput、stall、waste、fairness。</p>
+<h3>M8｜Cooperative preemption spike</h3>
+<ul>
+<li><input disabled="" type="checkbox"> <code>DecodeCheckpoint</code> schema：epoch、seq、emitted tokens、KV handle、TPOT、served quantum。</li>
+<li><input disabled="" type="checkbox"> Keep／Move decision＋safety margin。</li>
+<li><input disabled="" type="checkbox"> D action grant：首期只 <code>report_checkpoint</code>／<code>abort_self</code>。</li>
+<li><input disabled="" type="checkbox"> old epoch late frame drop。</li>
+<li><input disabled="" type="checkbox"> max preemption／min quantum／aging。</li>
+<li><input disabled="" type="checkbox"> <code>preemptions_per_completed_request</code> hard gate。</li>
+<li><input disabled="" type="checkbox"> R2 global KV checkpoint 作为独立 topology，不能假设已存在。</li>
+</ul>
+<p>进入条件：M7 通过 G-D1，且 R0／R1 recovery p95 有实测或可信校准。</p>
+<h3>M9｜1-GPU calibration</h3>
+<ul>
+<li><input disabled="" type="checkbox"> 扫 uncached input tokens／batch state，拟合 <code>prefill_ms</code>。</li>
+<li><input disabled="" type="checkbox"> 扫 output length／batch state，拟合 TPOT／decode work。</li>
+<li><input disabled="" type="checkbox"> 记录 estimate residual，不强行正态。</li>
+<li><input disabled="" type="checkbox"> 如 M5 敏感，再加 KVT benchmark；否则不借 RDMA 集群。</li>
+<li><input disabled="" type="checkbox"> simulator 参数版本化。</li>
+</ul>
+<p>机器：先 1 台目标机型；此阶段不需要 4P+4D。</p>
+<h3>M10｜Multi-GPU replay</h3>
+<ul>
+<li><input disabled="" type="checkbox"> N=4 P＋D pool，trace 1×／2× replay。</li>
+<li><input disabled="" type="checkbox"> Random／S3／S5／winner 对照。</li>
+<li><input disabled="" type="checkbox"> engine hit 真值、client TTFT／TPOT、attempt trace 三源对账。</li>
+<li><input disabled="" type="checkbox"> shadow gated decision，不 enforce。</li>
+<li><input disabled="" type="checkbox"> simulator vs real 排名一致性。</li>
+</ul>
+<p>通过后才决定是否接 LLMClientV1 enforce／Decode D2。</p>
+<h3>M11｜Production implementation，另立 RFC／MR</h3>
+<ul>
+<li><input disabled="" type="checkbox"> selector 接入点单独拍板：Turbo／FlexLB master／LLMClientV1 SDK，不重复造全局 map。</li>
+<li><input disabled="" type="checkbox"> Client 保留 request ledger／SLO／grant／continuation owner。</li>
+<li><input disabled="" type="checkbox"> <code>off｜shadow｜enforce</code>，默认 off。</li>
+<li><input disabled="" type="checkbox"> required mode 仅 test workspace，防 fallback 盖问题。</li>
+<li><input disabled="" type="checkbox"> chain mock：timeout、stale view、P rollback、D reject、lease expiry、late frame、client crash。</li>
+<li><input disabled="" type="checkbox"> canary 看 completed goodput／waste／fairness，不只看 hit。</li>
+</ul>
+<hr>
+<h2>10. Fable review resolution</h2>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Resolution</th>
+<th>Design impact</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Abstraction boundary</td>
+<td>接受，但不是全笛卡尔积</td>
+<td>增加 validity matrix、capability requirement、三个 coupling</td>
+</tr>
+<tr>
+<td>S3／S4</td>
+<td>拆成 independent selector</td>
+<td>共享 <code>CapacityGate</code>／<code>BoundedFallback</code>，结果可归因</td>
+</tr>
+<tr>
+<td>Session proxy</td>
+<td>接受 strict online linker</td>
+<td>增加 hot-block exclusion／family cap；主看 skew／staleness</td>
+</tr>
+<tr>
+<td>FlexLB</td>
+<td>先复刻 <code>0.7</code>，再 calibrated</td>
+<td>v1 是解释 diff 的锚点</td>
+</tr>
+<tr>
+<td>Experiment order</td>
+<td>LRU 排 selector，再扫 eviction</td>
+<td>避免全笛卡尔积</td>
+</tr>
+<tr>
+<td>Decode scope</td>
+<td>D1／D1.5 是 implementation ceiling</td>
+<td>D2 仅在 recovery gate 通过后做 spike</td>
+</tr>
+<tr>
+<td>Goodput</td>
+<td>strict completed 为主，lenient 为辅</td>
+<td>partial output 永远单列</td>
+</tr>
+<tr>
+<td>Fairness</td>
+<td>v1 使用 tenant-weighted virtual runtime</td>
+<td>quota／TPM ledger 暂不进入 overlay</td>
+</tr>
+<tr>
+<td>R2</td>
+<td>独立 Decode checkpoint capability</td>
+<td>不与 prefix Store 混为一体</td>
+</tr>
+<tr>
+<td>G-D2</td>
+<td>增益＋尾延迟／waste／fairness 不劣化</td>
+<td>增加 preemptions per completed request 硬上限</td>
+</tr>
+</tbody></table>
+<p>Review 额外提出 G1–G7，均已吸收到正文和 milestone：metric unit、synthetic block ID、cache visibility、replay mode、relative capacity gate、replica mechanism attribution、Mooncake Algorithm 1 具名对照。</p>
+<hr>
+</section>
+<section id="ref" class="section"><h2>6. 引用</h2><h2>11. References</h2>
+<ul>
+<li>Mooncake paper：<a href="https://arxiv.org/abs/2407.00079">https://arxiv.org/abs/2407.00079</a></li>
+<li>Mooncake repository：<a href="https://github.com/kvcache-ai/Mooncake">https://github.com/kvcache-ai/Mooncake</a></li>
+<li>Existing v2 concept／insight doc：<code>/Users/zhangpeiwen/Downloads/tongyi/github/prefill-cache-sim/DESIGN.md</code></li>
+<li>Fable review：<code>/Users/zhangpeiwen/.codex/attachments/aed241a6-3244-439c-8b5e-16decf9de6f9/pasted-text.txt</code></li>
+<li>Decode lease handoff：<code>/Users/zhangpeiwen/dev-trees/DECODE_LEASE_HANDOFF.md</code></li>
+<li>gated-PD handoff：<code>/Users/zhangpeiwen/Code/tongyi/github/HANDOFF-gated-pd-ttft-admission.md</code></li>
+<li>Client KV／SLO admission：<code>/Users/zhangpeiwen/Downloads/client_token_scheduling_v0.2.md</code></li>
+<li>KVS architecture memory：<code>~/.claude/projects/-Users-zhangpeiwen/memory/project_kvstore_architecture.md</code></li>
+<li>Session affinity memory：<code>~/.claude/projects/-Users-zhangpeiwen/memory/project_inference_session_affinity.md</code></li>
+<li>autoTPM memory：<code>~/.claude/projects/-Users-zhangpeiwen/memory/reference_autotpm_priority_admission.md</code></li>
+<li>KV hit audit memory：<code>~/.claude/projects/-Users-zhangpeiwen/memory/reference_engine_vs_reported_cache_hit.md</code></li>
+</ul>
+</section>
+</main></div><div class="footer">Fable reviewed · M0／M1 complete · 2026-08-05 · 张珮文</div>
+<dialog id="detail"><div class="dialog-head"><h3>详情</h3><button class="close" aria-label="关闭">×</button></div><div class="dialog-body"></div></dialog>
+<script>
+document.querySelectorAll('.tab').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(b=>b.setAttribute('aria-selected','false'));btn.setAttribute('aria-selected','true');document.querySelectorAll('.tab-panel').forEach(p=>p.hidden=p.dataset.panel!==btn.dataset.tab)}));
+const details={request:['请求输入','Phase A 来自 Mooncake trace；runtime 增加 tier、SLO、affinity 与 logical request identity。'],planner:['决策层','基础题只替换 selector。扩展题由 Lifecycle Planner 管 probe、reserve、commit、rollback、continuation 与 preemption。'],prefill:['Prefill pool','依据 prefix warmth、load、capacity 与 TTFT risk 选择节点；cache topology 决定 local hit 和 shared KVS hit 的价值。'],decode:['Decode pool','D1 用自然 LENGTH 形成 continuation；D2 只在安全 checkpoint 做 cooperative preemption。'],kvs:['Shared KVS／checkpoint','prefix KVS 与 Decode checkpoint 是两种不同能力。没有可恢复 checkpoint 时，abort 后只能重新 prefill。']};
+const dialog=document.getElementById('detail');document.querySelectorAll('.node').forEach(n=>n.addEventListener('click',()=>{const d=details[n.dataset.node];if(!d)return;dialog.querySelector('h3').textContent=d[0];dialog.querySelector('.dialog-body').textContent=d[1];dialog.showModal()}));dialog.querySelector('.close').onclick=()=>dialog.close();
+const links=[...document.querySelectorAll('.toc a')];const observer=new IntersectionObserver(entries=>entries.forEach(e=>{if(e.isIntersecting)links.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+e.target.id))}),{rootMargin:'-25% 0px -65% 0px'});document.querySelectorAll('main>section').forEach(s=>observer.observe(s));
+</script></body></html>

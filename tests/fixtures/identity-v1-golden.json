@@ -1,0 +1,33 @@
+{
+  "contract": "generated-sha256-v1",
+  "trace_sha256_hex": "b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711",
+  "block_size_tokens": 512,
+  "vectors": [
+    {
+      "name": "trace-parent",
+      "trace_line_index": 42,
+      "parent_kind": "TRACE_BLOCK",
+      "parent_trace_block_id": 123456789,
+      "generated_index": 0,
+      "message_hex": "000000000000001367656e6572617465642d7368613235362d7631b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe7110000000000000200000000000000002a0000000000075bcd150000000000000000",
+      "digest_hex": "4469ad9439bbef9078dd0d2abbdc200aae2a97617565b1ff0448e31803ff7777"
+    },
+    {
+      "name": "generated-parent",
+      "trace_line_index": 42,
+      "parent_kind": "GENERATED_BLOCK",
+      "parent_generated_digest_hex": "4469ad9439bbef9078dd0d2abbdc200aae2a97617565b1ff0448e31803ff7777",
+      "generated_index": 1,
+      "message_hex": "000000000000001367656e6572617465642d7368613235362d7631b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe7110000000000000200000000000000002a014469ad9439bbef9078dd0d2abbdc200aae2a97617565b1ff0448e31803ff77770000000000000001",
+      "digest_hex": "18981ac08348a48e9d60cdc168f3f0a2b42312d1fceb59b1e6caec8df527e869"
+    },
+    {
+      "name": "empty-prefix",
+      "trace_line_index": 0,
+      "parent_kind": "EMPTY_PREFIX",
+      "generated_index": 0,
+      "message_hex": "000000000000001367656e6572617465642d7368613235362d7631b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe71100000000000002000000000000000000020000000000000000",
+      "digest_hex": "373eea6c0c17ab14d1fe4e9f70473a00b656b5bd6ed00ec0fdbd8a3e7e8f2940"
+    }
+  ]
+}

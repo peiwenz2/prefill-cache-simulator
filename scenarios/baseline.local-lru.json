@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0.0",
+  "scenario_id": "phase-a-local-lru-delayed",
+  "phase": "A",
+  "seed": 713,
+  "trace": {
+    "format": "MOONCAKE_JSONL",
+    "path": "../mooncake_trace.jsonl",
+    "sha256": "b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711",
+    "block_size_tokens": 512
+  },
+  "identity_contract": {
+    "logical_request_id_scheme": "trace-sha256-line-index-v1",
+    "generated_block_id_scheme": "generated-sha256-v1"
+  },
+  "randomness_contract": {
+    "stream_scheme": "named-sha256-v1"
+  },
+  "replay": {
+    "mode": "QUEUED",
+    "speed": 1.0,
+    "cache_visibility": "INSERT_AT_COMPLETION",
+    "cluster_view": {
+      "mode": "DELAYED",
+      "delay_ms": 100,
+      "loss_probability": 0
+    },
+    "time_model": {
+      "kind": "NORMALIZED_WORK",
+      "prefill_uncached_token_ms": 1.0,
+      "model_version": "normalized-work-v1"
+    }
+  },
+  "cluster": {
+    "prefill_nodes": 4,
+    "decode_nodes": 0,
+    "cache_capacity": {
+      "mode": "FIXED_TOTAL",
+      "total_blocks": 50000
+    }
+  },
+  "selector": {
+    "id": "S1_ROUND_ROBIN"
+  },
+  "eviction": {
+    "id": "E1_LRU"
+  },
+  "topology": {
+    "mode": "LOCAL_ONLY"
+  },
+  "execution": {
+    "handoff_protocol": "P0_PD",
+    "decode_policy": "D0_NO_LEASE",
+    "recovery_mode": "R0_RECOMPUTE"
+  },
+  "metrics": {
+    "cache_hit_units": ["BLOCK_REF", "TOKEN_WEIGHTED"],
+    "report_replica_factor": true,
+    "report_inflight_wait": false
+  },
+  "output": {
+    "directory": "../results/phase-a-local-lru-delayed",
+    "formats": ["CSV", "JSON"],
+    "record_decision_trace": true
+  }
+}

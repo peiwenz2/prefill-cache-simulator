@@ -1,0 +1,432 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zhangpeiwen/prefill-cache-sim/scenario.schema.json",
+  "title": "Prefill Cache Simulator Phase-A resolved-run scenario",
+  "description": "Strict schema 1.x contract for a fully resolved, single-seed Phase-A run. Sweep expansion and later phases are outside this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "scenario_id",
+    "phase",
+    "seed",
+    "trace",
+    "identity_contract",
+    "randomness_contract",
+    "replay",
+    "cluster",
+    "selector",
+    "eviction",
+    "topology",
+    "execution",
+    "metrics",
+    "output"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "scenario_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{2,79}$"
+    },
+    "phase": {"const": "A"},
+    "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "trace": {"$ref": "#/$defs/trace"},
+    "identity_contract": {"$ref": "#/$defs/identity_contract"},
+    "randomness_contract": {"$ref": "#/$defs/randomness_contract"},
+    "replay": {"$ref": "#/$defs/replay"},
+    "cluster": {"$ref": "#/$defs/cluster"},
+    "selector": {"$ref": "#/$defs/selector"},
+    "eviction": {"$ref": "#/$defs/eviction"},
+    "topology": {"$ref": "#/$defs/topology"},
+    "execution": {"$ref": "#/$defs/execution"},
+    "metrics": {"$ref": "#/$defs/metrics"},
+    "output": {"$ref": "#/$defs/output"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["replay"],
+        "properties": {
+          "replay": {
+            "required": ["cache_visibility"],
+            "properties": {
+              "cache_visibility": {"const": "INFLIGHT_DEDUP_WAIT"}
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "metrics": {
+            "properties": {"report_inflight_wait": {"const": true}}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["replay"],
+        "properties": {
+          "replay": {
+            "required": ["mode"],
+            "properties": {"mode": {"const": "CACHE_ONLY"}}
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "selector": {
+            "oneOf": [
+              {"$ref": "#/$defs/selector_s0"},
+              {"$ref": "#/$defs/selector_s1"},
+              {"$ref": "#/$defs/selector_s3"}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["metrics"],
+        "properties": {
+          "metrics": {
+            "required": ["report_inflight_wait"],
+            "properties": {"report_inflight_wait": {"const": true}}
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "replay": {
+            "required": ["cache_visibility"],
+            "properties": {
+              "cache_visibility": {"const": "INFLIGHT_DEDUP_WAIT"}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "path", "sha256", "block_size_tokens"],
+      "properties": {
+        "format": {"const": "MOONCAKE_JSONL"},
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "block_size_tokens": {"type": "integer", "minimum": 1}
+      }
+    },
+    "identity_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["logical_request_id_scheme", "generated_block_id_scheme"],
+      "properties": {
+        "logical_request_id_scheme": {"const": "trace-sha256-line-index-v1"},
+        "generated_block_id_scheme": {"const": "generated-sha256-v1"}
+      }
+    },
+    "randomness_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stream_scheme"],
+      "properties": {
+        "stream_scheme": {"const": "named-sha256-v1"}
+      }
+    },
+    "replay": {
+      "oneOf": [
+        {"$ref": "#/$defs/replay_cache_only"},
+        {"$ref": "#/$defs/replay_queued"}
+      ]
+    },
+    "replay_cache_only": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "cache_visibility", "cluster_view"],
+      "properties": {
+        "mode": {"const": "CACHE_ONLY"},
+        "cache_visibility": {"const": "INSERT_AT_COMPLETION"},
+        "cluster_view": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": {"mode": {"const": "ORACLE"}}
+        }
+      }
+    },
+    "replay_queued": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "speed",
+        "cache_visibility",
+        "cluster_view",
+        "time_model"
+      ],
+      "properties": {
+        "mode": {"const": "QUEUED"},
+        "speed": {"type": "number", "exclusiveMinimum": 0},
+        "cache_visibility": {
+          "enum": ["INSERT_AT_COMPLETION", "INFLIGHT_DEDUP_WAIT"]
+        },
+        "cluster_view": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mode"],
+              "properties": {"mode": {"const": "ORACLE"}}
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mode", "delay_ms", "loss_probability"],
+              "properties": {
+                "mode": {"const": "DELAYED"},
+                "delay_ms": {"type": "number", "minimum": 0},
+                "loss_probability": {"type": "number", "minimum": 0, "maximum": 1}
+              }
+            }
+          ]
+        },
+        "time_model": {"$ref": "#/$defs/time_model"}
+      }
+    },
+    "time_model": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "prefill_uncached_token_ms", "model_version"],
+          "properties": {
+            "kind": {"const": "NORMALIZED_WORK"},
+            "prefill_uncached_token_ms": {"type": "number", "exclusiveMinimum": 0},
+            "model_version": {"type": "string", "minLength": 1}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "prefill_uncached_token_ms", "model_version"],
+          "properties": {
+            "kind": {"const": "CALIBRATED_MS"},
+            "prefill_uncached_token_ms": {"type": "number", "exclusiveMinimum": 0},
+            "model_version": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "cluster": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prefill_nodes", "decode_nodes", "cache_capacity"],
+      "properties": {
+        "prefill_nodes": {"type": "integer", "minimum": 1},
+        "decode_nodes": {"const": 0},
+        "cache_capacity": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mode", "total_blocks"],
+              "properties": {
+                "mode": {"const": "FIXED_TOTAL"},
+                "total_blocks": {"type": "integer", "minimum": 1}
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mode", "per_node_blocks"],
+              "properties": {
+                "mode": {"const": "FIXED_PER_NODE"},
+                "per_node_blocks": {"type": "integer", "minimum": 1}
+              }
+            }
+          ]
+        }
+      }
+    },
+    "selector": {
+      "oneOf": [
+        {"$ref": "#/$defs/selector_s0"},
+        {"$ref": "#/$defs/selector_s1"},
+        {"$ref": "#/$defs/selector_s2"},
+        {"$ref": "#/$defs/selector_s3"},
+        {"$ref": "#/$defs/selector_s4"},
+        {"$ref": "#/$defs/selector_s5"},
+        {"$ref": "#/$defs/selector_s6"}
+      ]
+    },
+    "selector_s0": {"$ref": "#/$defs/selector_s0_shape"},
+    "selector_s0_shape": {
+      "type": "object", "additionalProperties": false, "required": ["id"],
+      "properties": {"id": {"const": "S0_RANDOM"}}
+    },
+    "selector_s1": {
+      "type": "object", "additionalProperties": false, "required": ["id"],
+      "properties": {"id": {"const": "S1_ROUND_ROBIN"}}
+    },
+    "selector_s2": {
+      "type": "object", "additionalProperties": false, "required": ["id"],
+      "properties": {"id": {"const": "S2_LEAST_WORK"}}
+    },
+    "capacity_gate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["hard_enabled", "soft_alpha"],
+      "properties": {
+        "hard_enabled": {"type": "boolean"},
+        "soft_alpha": {"type": "number", "minimum": 1}
+      }
+    },
+    "fallback": {
+      "type": "object", "additionalProperties": false,
+      "required": ["max_secondary_candidates", "terminal"],
+      "properties": {
+        "max_secondary_candidates": {"type": "integer", "minimum": 0},
+        "terminal": {"enum": ["LEAST_WORK", "ROUND_ROBIN"]}
+      }
+    },
+    "selector_s3": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "capacity_gate", "fallback", "affinity"],
+      "properties": {
+        "id": {"const": "S3_GB_PREFIX_BUCKET"},
+        "capacity_gate": {"$ref": "#/$defs/capacity_gate"},
+        "fallback": {"$ref": "#/$defs/fallback"},
+        "affinity": {
+          "type": "object", "additionalProperties": false,
+          "required": ["provider", "prefix_anchor_k"],
+          "properties": {
+            "provider": {"const": "PREFIX_ANCHOR"},
+            "prefix_anchor_k": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    },
+    "selector_s4": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "capacity_gate", "fallback", "affinity"],
+      "properties": {
+        "id": {"const": "S4_SESSION_AFFINITY"},
+        "capacity_gate": {"$ref": "#/$defs/capacity_gate"},
+        "fallback": {"$ref": "#/$defs/fallback"},
+        "affinity": {
+          "type": "object", "additionalProperties": false,
+          "required": ["provider", "link_ttl_ms", "minimum_shared_blocks", "hot_block_percentile", "family_size_cap"],
+          "properties": {
+            "provider": {"const": "ONLINE_CONVERSATION_LINKER"},
+            "link_ttl_ms": {"type": "integer", "minimum": 1},
+            "minimum_shared_blocks": {"type": "integer", "minimum": 1},
+            "hot_block_percentile": {"type": "number", "exclusiveMinimum": 0, "maximum": 100},
+            "family_size_cap": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    },
+    "selector_s5": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "flexlb"],
+      "properties": {
+        "id": {"const": "S5_FLEXLB_TTFT"},
+        "flexlb": {
+          "type": "object", "additionalProperties": false,
+          "required": ["cache_discount", "top_fraction", "similar_band_ratio"],
+          "properties": {
+            "cache_discount": {"const": 0.7},
+            "top_fraction": {"const": 0.3},
+            "similar_band_ratio": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        }
+      }
+    },
+    "selector_s6": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "calibrated"],
+      "properties": {
+        "id": {"const": "S6_CALIBRATED_TTFT"},
+        "calibrated": {
+          "type": "object", "additionalProperties": false,
+          "required": ["model_kind", "model_version", "similar_band_ratio"],
+          "properties": {
+            "model_kind": {"enum": ["NORMALIZED_WORK", "CALIBRATED_MS"]},
+            "model_version": {"type": "string", "minLength": 1},
+            "similar_band_ratio": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        }
+      }
+    },
+    "eviction": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false, "required": ["id"],
+          "properties": {"id": {"const": "E0_FIFO"}}
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["id"],
+          "properties": {"id": {"const": "E1_LRU"}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "protected_fraction"],
+          "properties": {
+            "id": {"const": "E2_SLRU"},
+            "protected_fraction": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "ghost_capacity_blocks"],
+          "properties": {
+            "id": {"const": "E3_SECOND_HIT_ADMISSION"},
+            "ghost_capacity_blocks": {"type": "integer", "minimum": 1}
+          }
+        }
+      ]
+    },
+    "topology": {
+      "type": "object", "additionalProperties": false, "required": ["mode"],
+      "properties": {"mode": {"const": "LOCAL_ONLY"}}
+    },
+    "execution": {
+      "type": "object", "additionalProperties": false,
+      "required": ["handoff_protocol", "decode_policy", "recovery_mode"],
+      "properties": {
+        "handoff_protocol": {"const": "P0_PD"},
+        "decode_policy": {"const": "D0_NO_LEASE"},
+        "recovery_mode": {"const": "R0_RECOMPUTE"}
+      }
+    },
+    "metrics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["cache_hit_units", "report_replica_factor", "report_inflight_wait"],
+      "properties": {
+        "cache_hit_units": {
+          "type": "array",
+          "prefixItems": [{"const": "BLOCK_REF"}, {"const": "TOKEN_WEIGHTED"}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "report_replica_factor": {"type": "boolean"},
+        "report_inflight_wait": {"type": "boolean"}
+      }
+    },
+    "output": {
+      "type": "object", "additionalProperties": false,
+      "required": ["directory", "formats", "record_decision_trace"],
+      "properties": {
+        "directory": {"type": "string", "minLength": 1},
+        "formats": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": {"enum": ["CSV", "JSON"]}
+        },
+        "record_decision_trace": {"type": "boolean"}
+      }
+    }
+  }
+}

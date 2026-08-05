@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mooncake 论文精读：Kimi 的 KVCache 中心化推理架构（arXiv 2407.00079）</title>
+<style>
+  :root {
+    --ink: #1a1d23;
+    --ink-soft: #4a5060;
+    --paper: #faf8f4;
+    --card: #ffffff;
+    --accent: #b5462a;       /* 砖红：highlight */
+    --accent-soft: #fdf0eb;
+    --blue: #2b5d8a;
+    --blue-soft: #eef4f9;
+    --green: #3a6b4f;
+    --green-soft: #eef5f0;
+    --line: #e3ded4;
+    --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 28px 96px; }
+
+  header { padding: 72px 0 40px; border-bottom: 3px solid var(--ink); }
+  .kicker { font-size: 13px; letter-spacing: .18em; text-transform: uppercase; color: var(--accent); font-weight: 700; }
+  h1 { font-size: 38px; line-height: 1.25; margin: 14px 0 10px; letter-spacing: -0.01em; }
+  .subtitle { font-size: 17px; color: var(--ink-soft); max-width: 700px; }
+  .meta { margin-top: 18px; font-size: 13px; color: var(--ink-soft); }
+  .meta code { font-family: var(--mono); background: #efece5; padding: 1px 6px; border-radius: 4px; }
+
+  h2 { font-size: 26px; margin: 64px 0 6px; padding-top: 8px; letter-spacing: -0.01em; }
+  h2 .no { color: var(--accent); font-family: var(--mono); font-size: 20px; margin-right: 10px; }
+  h3 { font-size: 19px; margin: 36px 0 4px; }
+  p { margin: 12px 0; }
+  strong { color: var(--ink); }
+  .lede { font-size: 18px; color: var(--ink); }
+
+  .box {
+    border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+    padding: 18px 22px; margin: 20px 0;
+  }
+  .box.good { border-left: 5px solid var(--accent); background: var(--accent-soft); }
+  .box.note { border-left: 5px solid var(--blue); background: var(--blue-soft); }
+  .box.map  { border-left: 5px solid var(--green); background: var(--green-soft); }
+  .box .tag { font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+  .box.good .tag { color: var(--accent); }
+  .box.note .tag { color: var(--blue); }
+  .box.map  .tag { color: var(--green); }
+  .box p:last-child { margin-bottom: 4px; }
+
+  table { border-collapse: collapse; width: 100%; margin: 18px 0; font-size: 14.5px; background: var(--card); }
+  th, td { border: 1px solid var(--line); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1ede4; font-size: 13px; letter-spacing: .04em; }
+  td.num { font-family: var(--mono); white-space: nowrap; }
+
+  .formula {
+    font-family: var(--mono); font-size: 14px; background: #23262e; color: #e8e6e0;
+    border-radius: 10px; padding: 16px 20px; overflow-x: auto; margin: 18px 0; line-height: 1.9;
+  }
+  .formula .c { color: #8a93a8; }
+  .formula .hl { color: #ffb38a; }
+
+  .figrow { display: flex; gap: 16px; flex-wrap: wrap; margin: 20px 0; }
+  .stat {
+    flex: 1 1 150px; background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .stat .v { font-size: 30px; font-weight: 800; color: var(--accent); font-family: var(--mono); letter-spacing: -0.02em; }
+  .stat .k { font-size: 13px; color: var(--ink-soft); margin-top: 2px; }
+
+  .flow {
+    font-family: var(--mono); font-size: 13.5px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; padding: 18px 22px; overflow-x: auto; white-space: pre; line-height: 1.9; margin: 18px 0;
+  }
+
+  .toc { columns: 2; column-gap: 40px; font-size: 14.5px; margin: 24px 0 0; padding: 0; list-style: none; }
+  .toc li { margin: 4px 0; break-inside: avoid; }
+  .toc a { color: var(--blue); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .toc .no { color: var(--accent); font-family: var(--mono); margin-right: 6px; font-size: 13px; }
+
+  .footnote { font-size: 13px; color: var(--ink-soft); border-top: 1px solid var(--line); margin-top: 72px; padding-top: 16px; }
+  @media (max-width: 640px) { .toc { columns: 1; } h1 { font-size: 30px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">Paper Reading · FAST'25 Best Paper 系</div>
+  <h1>Mooncake：Kimi 的 KVCache 中心化<br>分离式推理架构</h1>
+  <p class="subtitle">Moonshot AI × 清华。一句话：<strong>把 KVCache 当成整个推理系统的"一等公民"来调度</strong>——P/D 分离只是手段，用便宜的 DRAM/SSD 换昂贵的 GPU 计算、并在过载时"早拒绝该拒绝的请求"才是灵魂。</p>
+  <div class="meta">
+    原文 <code>arXiv 2407.00079</code> · Qin, Li, He, Zhang, Wu, Zheng, Xu ·
+    本报告面向：prefill 路由 × cache × SLO 设计（prefill-cache-sim/DESIGN.md）的 pingpong 参考 · 2026-08-05
+  </div>
+  <ul class="toc">
+    <li><a href="#s1"><span class="no">1</span>他们要解决什么问题</a></li>
+    <li><a href="#s2"><span class="no">2</span>架构总览：四个角色</a></li>
+    <li><a href="#s3"><span class="no">3</span>一个请求的一生（4 步 workflow）</a></li>
+    <li><a href="#s4"><span class="no">4</span>Prefill 池的两个硬核设计</a></li>
+    <li><a href="#s5"><span class="no">5</span>核心调度算法（Algorithm 1 拆解）</a></li>
+    <li><a href="#s6"><span class="no">6</span>热点 cache 怎么办：不预测，被动复制</a></li>
+    <li><a href="#s7"><span class="no">7</span>过载调度：early rejection 与振荡问题</a></li>
+    <li><a href="#s8"><span class="no">8</span>开源 trace：我们模拟器的数据集</a></li>
+    <li><a href="#s9"><span class="no">9</span>实验结果：数字怎么读</a></li>
+    <li><a href="#s10"><span class="no">10</span>做得好的地方（9 条 highlight）</a></li>
+    <li><a href="#s11"><span class="no">11</span>可挑战之处 &amp; 与我们设计的映射</a></li>
+  </ul>
+</header>
+
+<!-- ============ 1 ============ -->
+<h2 id="s1"><span class="no">1</span>他们要解决什么问题</h2>
+<p class="lede">Kimi 是长上下文起家的 MaaS。这个业务形态给推理系统出了三道题，恰好是学术界当时都没答的：</p>
+
+<table>
+<tr><th style="width:26%">难题</th><th>为什么难</th><th>Mooncake 的回答</th></tr>
+<tr>
+  <td><strong>① 长上下文的 prefill 极贵</strong></td>
+  <td>attention 计算量随输入长度平方增长。trace 里平均输入 7,590 tokens、输出只有 182——输入输出比约 <strong>720:1</strong>，prefill 就是成本大头</td>
+  <td>能复用的 KVCache 绝不重算（前缀缓存），单条超长请求用多机流水线并行（CPP）压 TTFT</td>
+</tr>
+<tr>
+  <td><strong>② 吞吐优化和延迟 SLO 天然打架</strong></td>
+  <td>复用远端 KVCache → 传输拖长 TTFT；攒大 batch 提 MFU → TBT 变差。两个提吞吐的手段都会踩延迟红线</td>
+  <td>调度目标改成"<strong>在 TTFT/TBT SLO 约束下最大化有效吞吐（goodput）</strong>"，而不是裸吞吐</td>
+</tr>
+<tr>
+  <td><strong>③ 常态过载</strong></td>
+  <td>用户增长远快于 GPU 到货。学术界的假设"所有请求都会被处理"在 Kimi 不成立</td>
+  <td>过载调度作为一等设计：预测负载、<strong>提前拒绝</strong>注定完不成的请求，别让 GPU 白算</td>
+</tr>
+</table>
+
+<div class="box note">
+  <div class="tag">关键定义 · goodput</div>
+  <p>论文对 goodput 的口径比同类工作更狠：<strong>只有完整跑完全程的请求才计入吞吐</strong>。一个请求 prefill 算完了、decode 中途被拒，之前消耗的所有 GPU 秒全部记为浪费。这个口径直接推出了后面整套 early rejection 的设计——"要拒就趁早拒"从口号变成了数学必然。</p>
+</div>
+
+<!-- ============ 2 ============ -->
+<h2 id="s2"><span class="no">2</span>架构总览：四个角色</h2>
+<p>Mooncake 不只是"P/D 分离"。它把 GPU 集群里<strong>闲着的 CPU、DRAM、SSD、RDMA 网卡</strong>也组织起来，形成第三个池——分布式 KVCache 池。四个角色：</p>
+
+<div class="flow">┌────────────────────── Conductor（全局调度器，大脑）──────────────────────┐
+│  每个请求：选 (prefill 节点, decode 节点) 对；顺带决定 KV 块的复制/换出      │
+└──────────────┬──────────────────────────────┬───────────────────────────┘
+               ▼                              ▼
+   ┌─────────────────────┐        ┌─────────────────────┐
+   │  Prefill 池          │  KV 流  │  Decode 池           │
+   │  目标: 复用KV、压TTFT │ ─────▶ │  目标: 攒大batch提MFU │
+   │  约束: TTFT SLO+DRAM │        │  约束: TBT SLO+VRAM  │
+   └──────────┬──────────┘        └──────────┬──────────┘
+              │      ▲                        │
+              ▼      │ (GPUDirect RDMA)       ▼
+   ┌──────────────────────────────────────────────────────┐
+   │  分布式 KVCache 池（CPU DRAM/SSD 分页存储, 前缀链哈希去重）│
+   │  搬运工: Messenger（每节点独立进程, 收信号跨机高速传 KV）  │
+   └──────────────────────────────────────────────────────┘</div>
+
+<p>几个容易被忽略的要点：</p>
+<p><strong>① P 池和 D 池的目标函数是相反的。</strong>Prefill 是算力密集（计算时间随输入超线性涨），追求复用 + 压 TTFT；Decode 是访存密集（一次只出一个 token，计算时间随 batch 亚线性涨），追求大 batch + 守 TBT。放一起（vLLM 式耦合）就是长 prefill 打断 decode 的根源。</p>
+<p><strong>② KV 块的身份是"前缀链哈希"。</strong>每 512 tokens 一块，块的 hash 包含自己 + 全部前缀的 hash——两个块 hash 相同 ⇔ 从头到这块的所有 token 完全一致，即可复用。这也是开源 trace 里 <code style="font-family:var(--mono)">hash_ids</code> 字段的语义。</p>
+<p><strong>③ Conductor 不只路由请求，还调度 KV 块本身。</strong>热块复制到多台机防拉取拥塞，冷块换出省容量——请求调度和块放置是同一个大脑的两只手。</p>
+
+<!-- ============ 3 ============ -->
+<h2 id="s3"><span class="no">3</span>一个请求的一生（4 步 workflow）</h2>
+<table>
+<tr><th style="width:20%">步骤</th><th>做什么</th><th>关键细节</th></tr>
+<tr><td><strong>1. KVCache 复用</strong></td><td>选中的 prefill 节点按前缀块 ID 从远端 CPU 内存把可复用 KV 拉进 GPU</td><td>选点同时平衡三件事：复用最多 / 各节点负载均衡 / TTFT SLO 兜住（§5 算法）</td></tr>
+<tr><td><strong>2. 增量 prefill</strong></td><td>只算未命中的部分；超过 prefill_chunk（&gt;1000 tokens）就切块流水线执行</td><td>chunk 阈值选到刚好吃满 GPU 算力——保 MFU 的同时不给单请求过度切碎</td></tr>
+<tr><td><strong>3. KV 传输</strong></td><td>Messenger 把每层算出来的 KV <strong>逐层、异步</strong>流式发往 decode 节点的 CPU 内存</td><td>与步骤 2 完全重叠——传输延迟被计算隐藏（§4.2 layer-wise）</td></tr>
+<tr><td><strong>4. Decode</strong></td><td>KV 全部到齐后加入 decode 节点的 continuous batching</td><td>⚠️ decode 侧本地调度器会 <strong>double-check</strong> TBT SLO——预估的负载可能已经变了，此时拒绝 = prefill 白算（这正是 early rejection 要消灭的浪费）</td></tr>
+</table>
+
+<div class="box map">
+  <div class="tag">映射 → 我们的 DESIGN.md</div>
+  <p>步骤 4 的 double-check 浪费，就是我们 §4 里 Gated-PD / D-reserve 要解决的同一个问题。Mooncake 的答案是"把 D 侧评估提前到 prefill 开始前"（预测式，§7）；Gated-PD 的答案是 probe+COMMIT（测量式）；Mooncake Store 化后则是"KV 停在池里等 D"（结构性消解）。三条路线在 DESIGN.md §4.3 路径表里分别是 D、B、D/E。</p>
+</div>
+
+<!-- ============ 4 ============ -->
+<h2 id="s4"><span class="no">4</span>Prefill 池的两个硬核设计</h2>
+
+<h3>4.1 Chunked Pipeline Parallelism（CPP）：长上下文多机并行的"务实解"</h3>
+<p>128K/1M 上下文的单条请求，一台 8 卡机压不住 TTFT，必须多机。当时的候选方案：</p>
+<table>
+<tr><th style="width:22%">方案</th><th>问题</th></tr>
+<tr><td>跨机 Tensor 并行（TP）</td><td>每层要 2 次跨机 all-reduce，RDMA 也扛不住，prefill MFU 掉得厉害</td></tr>
+<tr><td>序列并行（SP，Ring/Striped Attention）</td><td>比跨机 TP 好，但仍每层至少通信一次；且"短请求走 TP 组、长请求走 SP 组"的分组架构需要频繁弹性伸缩两个组的规模——线上运维噩梦，还和 KV 传输抢网络</td></tr>
+<tr><td><strong>CPP（Mooncake 的选择）</strong></td><td>把输入切 chunk，不同 chunk 在流水线的不同节点上同时算。<strong>只在流水线 stage 边界通信一次</strong>，可与计算重叠；短请求长请求天然通吃，无需动态重组节点</td></tr>
+</table>
+<p>本质是把训练里的 pipeline 并行第一次搬到了推理 prefill 上。选它<strong>不是因为理论最快（SP 理论加速比更好），而是因为运维复杂度最低、网络占用最省</strong>——这个取舍思路本身就值得学（见 §10 highlight #8）。</p>
+
+<h3>4.2 Layer-wise Prefill：让 VRAM 从调度约束里消失</h3>
+<p>Prefill 是逐层算的、且是计算密集——这意味着<strong>每层的 KV 存取可以和计算完全重叠</strong>：算第 N 层 attention 前等第 N 层 KV 异步加载完成并预取 N+1 层；第 N 层算完立刻异步写出。全部层算完时，KV 也几乎传完了。</p>
+<div class="box note">
+  <div class="tag">这一步真正买到的东西</div>
+  <p>不是省了几百毫秒延迟，而是<strong>调度器从此可以无视 prefill 节点的 VRAM 余量</strong>——KV 即产即走，VRAM 占用时间趋近于零，只要装得下一条请求就行。于是 prefill 选点只剩两个变量：KV 分布 + DRAM 余量。<strong>用系统机制消灭一个调度维度，比在调度器里多考虑一个维度高明得多。</strong>论文还顺手指出这些空出来的 VRAM 未来可以跑 batch API 这类无 TBT 约束的任务。</p>
+</div>
+
+<!-- ============ 5 ============ -->
+<h2 id="s5"><span class="no">5</span>核心调度算法（Algorithm 1 拆解）</h2>
+<p>这是全文的心脏，也是你说的"magic function"在 Mooncake 里的形态——<strong>对每个候选 prefill 节点估一个 TTFT，选最小的；SLO 兜不住就 429 拒绝</strong>：</p>
+
+<div class="formula">
+<span class="c"># 对请求 R，遍历每个 prefill 实例 instance：</span>
+prefix_len   = instance 上已有的前缀命中长度
+T_queue      = 该实例排队中所有请求的 prefill 时间之和   <span class="c"># 排队时间</span>
+
+<span class="c"># 分支 1：本地命中已经够好（best_prefix_len/prefix_len &lt; balancing_threshold）</span>
+TTFT(instance) = T_queue + T_prefill(len(R), prefix_len)
+
+<span class="c"># 分支 2：别处有明显更长的前缀 → 考虑把 KV 从"最佳持有者"传过来</span>
+TTFT(instance) = <span class="hl">T_transfer</span>(持有者→instance, 差额块数) + T_queue + T_prefill(len(R), best_prefix_len)
+
+<span class="c"># 决策：</span>
+p = argmin TTFT;  d = 按负载选 decode 节点
+<span class="hl">if TTFT &gt; TTFT_SLO or TBT &gt; TBT_SLO:  reject R  (HTTP 429)</span>
+<span class="c"># 且：若 best_prefix_len/p.prefix_len &gt; threshold → 顺手把热 KV 复制到 p（热点迁移，见 §6）</span>
+</div>
+
+<p>三个工程细节决定了它能不能落地：</p>
+<p><strong>① T_prefill 是离线标定的预测模型</strong>，输入 = (请求长度, 前缀命中长度)。Transformer 计算模式规整，离线数据够多误差就小——这是整个方法可行的地基。</p>
+<p><strong>② T_queue 直接拿排队请求的预估 prefill 时间累加</strong>——因为 ① 准，所以 ② 才准。所有实例的 TTFT 并行算，调度本身开销可忽略。</p>
+<p><strong>③ T_transfer 最难预测</strong>（取决于发送端是否拥塞），论文坦承这一点，并把它作为"必须做热块复制"的动机——预测不了拥塞，就用副本消灭拥塞。</p>
+
+<div class="box map">
+  <div class="tag">映射 → 我们的 DESIGN.md</div>
+  <p>Algorithm 1 ≈ 我们的 <strong>M1（可标定相对 TTFT）+ M2 的 REJECT 分支</strong>。flexlb 的 <code style="font-family:var(--mono)">tokens×1.0 − hit×0.7 + queueTime</code> 是它的线性简化版（缺离线标定、缺 T_transfer、缺 SLO 门槛）。Mooncake 比 flexlb 多的三样：标定的非线性 T_prefill、显式 T_transfer 项、SLO 硬门槛；比我们 M3 少的：SLO 只是 pass/fail 门槛而非按违约概率定价，路由与淘汰也没合账（cache 池淘汰仍是独立的 LRU/LFU）。</p>
+</div>
+
+<!-- ============ 6 ============ -->
+<h2 id="s6"><span class="no">6</span>热点 cache 怎么办：不预测，被动复制</h2>
+<p>各 prefill 机各管一份本地前缀缓存，使用频率极度不均：system prompt 几乎每个请求都要，某用户的私有长文档只有他自己用。教科书解法是"收集全局使用统计 → 预测未来热度 → 主动放置"。论文明确说：<strong>我们试过想过，不行</strong>——业务高速增长期 workload 变化太快，预测未来使用量不现实。</p>
+<p>他们的替代方案是一套<strong>不需要预测的被动启发式</strong>，热点复制作为正常调度的副产品自动发生：</p>
+<table>
+<tr><th style="width:34%">规则</th><th>效果</th></tr>
+<tr><td>最佳持有者太忙时，请求被派到别的节点 + 传 KV 过去（Algorithm 1 分支 2）</td><td>被高频请求的块<strong>自动</strong>被复制到更多机器——越热的块被"顺手复制"的机会越多</td></tr>
+<tr><td>远端最佳前缀 ≤ 本地前缀 × threshold 时，宁可重算不传输</td><td>避免为一点点增量收益做跨机传输，抑制无谓的复制风暴</td></tr>
+</table>
+<p>实验（8P+8D，重放 23k 真实请求）：KVCache-centric 调度在平均 TTFT 和 TTFT SLO 达成率上同时优于 random 和 load-balancing 两个基线。</p>
+
+<div class="box note">
+  <div class="tag">阈值的诚实脚注</div>
+  <p>那个 balancing_threshold 目前是<strong>人工调的</strong>，论文脚注里承认了并说未来可以自适应。这也是我们 M3 的 V(b) 复制判据（p_reuse × recompute_cost / replicas）可以直接改进的点——把"要不要复制"从手工阈值变成定价。</p>
+</div>
+
+<!-- ============ 7 ============ -->
+<h2 id="s7"><span class="no">7</span>过载调度：early rejection 与它引发的振荡</h2>
+<p>这是全文最有"生产系统味"的一章，三步递进：</p>
+
+<h3>7.1 负载的定义就用 SLO 本身</h3>
+<p>耦合系统里 P/D 互相干扰，TTFT/TBT 难预测，只好用"请求数/容量"这种粗指标。分离之后两阶段独立，Mooncake 直接用 <strong>预测的最大 TTFT vs l_ttft、预测的最大 TBT vs l_tbt</strong> 当负载定义——负载指标和用户体验指标合二为一，不再有代理指标失真。</p>
+
+<h3>7.2 Early Rejection：把 D 的准入判断提前到 P 开始前</h3>
+<p>问题：P 和 D 的调度之间有时间差。请求 prefill 算完了才被 decode 拒，prefill 全白算。解法很直觉：<strong>请求一到就同时看 P、D 两池负载，取更差的那个决定接不接</strong>。</p>
+
+<h3>7.3 意外：朴素 early rejection 引发反相振荡</h3>
+<p>上线后观察到 20 台机器的集群里 P 池和 D 池负载<strong>反相波动</strong>（一个高峰对另一个低谷）。机理是一个经典的反馈延迟问题：</p>
+<div class="flow">Stage 1: P低D低 → 大量接收 → P 池被打满
+Stage 2: 这批 prefill 完成涌入 D → D 高 → 按"当前D负载"拒新请求 → P 池放空
+Stage 3: D 池消化完（没有新请求进来）→ D 低 → 又大量接收 → P 又被打满
+Stage 4: 循环往复……P/D 交替空转，集群利用率被振荡吃掉</div>
+<p>根因：<strong>用"当前"的 D 负载去决策"prefill 时长之后"才会到达 D 的请求</strong>——控制信号滞后了一个 prefill 周期，形成典型的滞后反馈振荡。</p>
+
+<h3>7.4 解法：基于预测的 early rejection</h3>
+<p>把决策依据从"当前 D 负载"换成"<strong>预测的、这条请求 prefill 完成时刻的 D 负载</strong>"。预测分两级：</p>
+<table>
+<tr><th style="width:22%">级别</th><th>思路</th><th>Mooncake 的选择</th></tr>
+<tr><td>请求级</td><td>预测每条请求的输出长度 → 精确推演</td><td>❌ 放弃——代价高/精度低，过载时资源最紧张恰恰最需要准</td></tr>
+<tr><td><strong>系统级</strong></td><td>不管单条请求，只估"t 时刻之后整个 D 池的 TBT 水位"：假设每条请求 decode 耗时统一为 t_d，把 t 时刻前 prefill 会完成的请求加进来、执行超过 t_d 的请求移出去，算平均 TBT/l_tbt</td><td>✅ 粗但稳，持续滚动估计，恰好匹配过载场景对鲁棒性的要求</td></tr>
+</table>
+<p>效果（8P+8D、2 倍速重放模拟过载）：拒绝请求数 <strong>4183（基线）→ 3771（early rejection）→ 3589（预测式）</strong>，即同等资源下多完成约 <strong>14%</strong> 的请求。</p>
+
+<!-- ============ 8 ============ -->
+<h2 id="s8"><span class="no">8</span>开源 trace：我们模拟器的数据集</h2>
+<p>论文开源了 1 小时线上真实请求 trace（就是我们 prefill-cache-sim 用的数据集），<strong>第一个可以做真实 KV 复用分析的公开数据集</strong>。采样时刻意优先收集同 session 的请求以保留缓存关系；隐私处理只留 timestamp / input_length / output_length / 重映射后的 hash_ids。</p>
+<div class="figrow">
+  <div class="stat"><div class="v">23,608</div><div class="k">请求数 / 1 小时</div></div>
+  <div class="stat"><div class="v">7,590</div><div class="k">平均输入 tokens</div></div>
+  <div class="stat"><div class="v">182</div><div class="k">平均输出 tokens</div></div>
+  <div class="stat"><div class="v">~50%</div><div class="k">理论复用上限（∞容量∞SLO）</div></div>
+</div>
+<p>论文自己给的缓存策略基线（单一全局池）：容量从 1,000 块提到 50,000 块，命中率 30%→50%，再往上几乎不涨；<strong>LRU 最好</strong>（51% vs LFU/LengthAware 的 51%/50%，小容量时 LRU 优势更明显）——复用的时间局部性极强。块热度极端不均：<strong>超过一半的块从未被复用，个别块被访问上万次</strong>——热点复制是必需品不是优化项。</p>
+<div class="box note">
+  <div class="tag">和我们自算画像的互相印证</div>
+  <p>我们在 DESIGN.md §0 算的三事实与论文一致且更细：理论上限 55.3%（我们按 token 加权 vs 论文按块）、top-10 块占 22.9% 引用、78.5% 的块只被引用一次、复用距离双峰（p50=4 请求 / p90=1629 请求）。论文的"50% 上限"还附了句诚实话：<strong>线上真实复用率远低于开源 benchmark 复现出来的值</strong>，但场景差异巨大——他们的 chat-to-paper 服务能到 90%。</p>
+</div>
+
+<!-- ============ 9 ============ -->
+<h2 id="s9"><span class="no">9</span>实验结果：数字怎么读</h2>
+<p>先说口径：所有实验用 <strong>LLaMA2-70B 同构 dummy 模型</strong>（保护专有信息 + 可复现），A800×8 节点、节点间 800Gbps RDMA。SLO 定义为相对值：TTFT_P90 ≤ 无干扰单请求的 10 倍、TBT_P90 ≤ 5 倍。基线 vLLM。</p>
+<table>
+<tr><th style="width:24%">实验</th><th>配置</th><th>结果</th><th>怎么读</th></tr>
+<tr>
+  <td>公开数据集<br>(ArXiv Summ. / L-Eval)</td>
+  <td>Mooncake-[3P+1D] vs vLLM-[4M]，同为 4 节点</td>
+  <td class="num">+20% / +40%</td>
+  <td>L-Eval 提升更大是因为 &gt;80% 前缀可缓存，prefix caching 直接吃掉大量 prefill。注意 [2P+2D] 配比反而 TTFT 不如 [3P+1D]——<strong>P:D 配比错了会亏</strong>，这是给容量规划的信号</td>
+</tr>
+<tr>
+  <td>模拟长上下文<br>(16k–128k prompt)</td>
+  <td>同上</td>
+  <td class="num">+50% ~ +525%</td>
+  <td>525% 是 128k 长 prompt 的极端场景：vLLM 的长 prefill 会打爆同 batch 的 decode TBT，被迫逐条处理；Mooncake 分离后 TBT 永不破线。<strong>头条数字来自最利己的场景，读的时候要知道这点</strong>——但方向真实</td>
+</tr>
+<tr>
+  <td>真实负载重放</td>
+  <td>Mooncake-[10P+10D] vs vLLM-[20M]，同为 20 节点</td>
+  <td class="num">+75% 承载</td>
+  <td>最有说服力的一组：TTFT 两家几乎全达标；<strong>TBT 达标率 Mooncake ≈100% vs vLLM 57%</strong>。分离架构的核心红利就是保 TBT</td>
+</tr>
+<tr>
+  <td>过载场景</td>
+  <td>8P+8D，trace 2 倍速重放</td>
+  <td class="num">拒绝 4183→3589</td>
+  <td>基线→early rejection→预测式逐级递减，验证 §7 三步递进各自有效</td>
+</tr>
+</table>
+
+<!-- ============ 10 ============ -->
+<h2 id="s10"><span class="no">10</span>做得好的地方（9 条 highlight）</h2>
+
+<div class="box good">
+  <div class="tag">Highlight #1 · 把"KVCache 是调度的中心"立成第一性原理</div>
+  <p>同期工作（Splitwise/DistServe/TetriInfer）都在做 P/D 分离，但都是"算力特性不同所以分开"的资源视角。Mooncake 独有的洞察是：<strong>请求怎么路由、块放在哪、谁被淘汰、谁被复制、请求要不要拒——全都是围绕 KVCache 的同一件事</strong>。架构图的中心不是 GPU 而是 KV 池。这个视角转换是全文最大的贡献，也直接启发了我们 DESIGN.md 的"一个函数五种决策"。</p>
+</div>
+
+<div class="box good">
+  <div class="tag">Highlight #2 · goodput 口径：没跑完 = 全浪费</div>
+  <p>把"只有完整完成的请求才算数"写进目标函数，一切设计（early rejection、D 侧提前评估、预测负载）都从这个口径里自然推导出来。<strong>商业系统的目标函数和论文刷榜的目标函数第一次真正对齐。</strong></p>
+</div>
+
+<div class="box good">
+  <div class="tag">Highlight #3 · 用便宜资源换贵资源，而且是"零新增成本"的便宜资源</div>
+  <p>GPU 服务器上的 CPU/DRAM/SSD/RDMA 本来就闲着。把它们组成分布式 KV 池 = 用已付费但未使用的资源换最贵的 GPU 计算。"Trading more storage for less computation"——会计学上这几乎是无本买卖，工程上只需要一个 Messenger。</p>
+</div>
+
+<div class="box good">
+  <div class="tag">Highlight #4 · 负载定义 = SLO 本身，消灭代理指标</div>
+  <p>不用"请求数/容量"这类代理指标，直接拿"预测 TTFT/TBT vs SLO 门槛"当负载。指标失真（代理指标健康但用户体验崩了）这类生产事故被定义级消灭。前提是分离架构让两阶段延迟可独立预测——<strong>架构选择反过来解锁了度量能力</strong>，这个联动很漂亮。</p>
+</div>
+
+<div class="box good">
+  <div class="tag">Highlight #5 · 发现并解决了一个"没人见过的新问题"：early rejection 振荡</div>
+  <p>反相振荡这个现象只有真的在 20 台机器上跑过朴素 early rejection 才会看到——这是<strong>生产系统反哺研究</strong>的典型样本：提出机制 → 上线 → 观察到副作用 → 定位到反馈延迟根因 → 用预测补偿。整个 §7.3-7.4 是控制论里"滞后反馈导致振荡、用预测器补偿"的教科书案例，但在 LLM serving 语境里是首次报告。</p>
+</div>
+
+<div class="box good">
+  <div class="tag">Highlight #6 · 知道什么时候放弃预测：两处务实的"不为"</div>
+  <p>① cache 热度不预测——增长期 workload 不可测，改用被动热点复制启发式；② 请求输出长度不预测——代价高精度低，改用系统级粗粒度预测。<strong>在能预测的地方（prefill 时间，计算规整）用尽预测，在不能预测的地方（未来热度、输出长度）果断用启发式</strong>——这条"预测能力边界"划得非常清醒，多数论文只会堆更复杂的预测模型。</p>
+</div>
+
+<div class="box good">
+  <div class="tag">Highlight #7 · Layer-wise 重叠"消灭调度维度"</div>
+  <p>逐层异步存取让 KV 即产即走，prefill 调度从此不用考虑 VRAM——用系统机制把一个约束从优化问题里整个删掉，比把它建模进调度器优雅一个量级。副产品（空闲 VRAM 跑 batch API）还顺手指了条商业化路。</p>
+</div>
+
+<div class="box good">
+  <div class="tag">Highlight #8 · CPP 的取舍：可运维性 &gt; 理论最优</div>
+  <p>明知 SP 理论加速更好，仍选 CPP，理由全是生产语言：不需要预建全局通信组、不需要动态调整节点分组、短长请求通吃、网络占用不和 KV 传输打架。<strong>论文里少见地把"弹性伸缩太复杂"当成一等否决理由</strong>——这是运维过大集群的人才写得出的判断。</p>
+</div>
+
+<div class="box good">
+  <div class="tag">Highlight #9 · 开源 trace + 全程诚实</div>
+  <p>第一个可做真实复用分析的公开 trace（我们的模拟器直接受益）。此外论文里的诚实密度很高：threshold 是手工调的（脚注承认）、线上复用率远低于开源 benchmark（Related Work 直说）、[2P+2D] 配比会输给基线（负结果照登）、T_transfer 难预测（坦承）。这些"自曝"让所有正面数字都更可信。</p>
+</div>
+
+<!-- ============ 11 ============ -->
+<h2 id="s11"><span class="no">11</span>可挑战之处 &amp; 与我们设计的映射</h2>
+
+<h3>11.1 可挑战 / 可超越的点</h3>
+<table>
+<tr><th style="width:30%">论文的选择</th><th>局限</th><th>我们 DESIGN.md 的对应改进</th></tr>
+<tr>
+  <td>SLO 是硬门槛（超了就 429）</td>
+  <td>所有没超线的方案被视为等价，无法表达"离违约多近"；不同 tier 请求无差别对待</td>
+  <td>M2：SLO 归一化 slack + 违约<strong>概率</strong>定价（λ_ttft·P[TTFT&gt;slo]），紧 SLO 请求自动获得亲和优先权</td>
+</tr>
+<tr>
+  <td>路由用 TTFT 打分，但 cache 池淘汰仍是独立的 LRU/LFU</td>
+  <td>路由和淘汰两本账——恰是我们批判 Turbo 的"策略分家"在 Mooncake 身上的残留</td>
+  <td>M3：块价值 V(b) 统一路由外部性与淘汰，合成一本账</td>
+</tr>
+<tr>
+  <td>热点复制阈值手工调</td>
+  <td>论文自己承认；阈值全局一个，不分块</td>
+  <td>V(b) 的 replicas 分母天然给出 per-block 复制判据</td>
+</tr>
+<tr>
+  <td>系统级负载预测假设 decode 耗时统一 t_d</td>
+  <td>粗；输出长度分布重尾时误差大</td>
+  <td>M2 用校准残差的经验分位数做 risk 项（§7 pingpong 议题 2）</td>
+</tr>
+<tr>
+  <td>D 侧仍有 double-check 拒绝（prefill 白算通道没有完全堵死）</td>
+  <td>early rejection 降低了概率但未消灭</td>
+  <td>DESIGN.md §4.3 路径 B（Gated-PD 测量式 probe）/ 路径 D（Store 化结构性消解）</td>
+</tr>
+</table>
+
+<h3>11.2 给模拟器 agent 的提示（Opus 5 可直接引用）</h3>
+<div class="box map">
+  <div class="tag">对照实验建议</div>
+  <p><strong>① 复现论文基线</strong>：单全局池 LRU @ 30k/50k 块容量应得 ~48%/50% 命中率（论文 Table 1）——这是模拟器正确性的免费 sanity check。<strong>② Algorithm 1 可作为 M1 与 M2 之间的第三个对照点</strong>（"Mooncake-style"：标定 T_prefill + T_transfer + SLO 硬门槛，无概率定价），从而把我们 M2/M3 的增益归因拆干净：多少来自概率化 SLO、多少来自路由淘汰合账。<strong>③ 过载实验照抄论文方法</strong>：trace 2 倍速重放 + 对比拒绝数，可直接对标 4183→3589 的改善幅度。</p>
+</div>
+
+<div class="footnote">
+  来源：arXiv 2407.00079（LaTeXML HTML 版全文，2025-09-03 生成）。本报告为内部学习用途的中文精读与评述；所有数字（+20%/40%、50–525%、+75%、TBT 达标 100% vs 57%、拒绝数 4183/3771/3589、trace 统计等）均直接取自论文原文。映射与批评部分（§11）为本报告作者观点，对应 prefill-cache-sim/DESIGN.md v2。
+</div>
+
+</div>
+</body>
+</html>

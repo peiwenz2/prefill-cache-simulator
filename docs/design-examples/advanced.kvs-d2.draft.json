@@ -1,0 +1,108 @@
+{
+  "$comment": "Design-only Phase-D sketch; intentionally does not validate against scenario.schema.json 1.x.",
+  "schema_version": "1.0.0",
+  "scenario_id": "phase-d-kvs-gated-pd-d2",
+  "phase": "D",
+  "seed": 713,
+  "trace": {
+    "format": "MOONCAKE_JSONL",
+    "path": "mooncake_trace.jsonl",
+    "sha256": "b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711",
+    "block_size_tokens": 512
+  },
+  "identity_contract": {
+    "logical_request_id_scheme": "trace-sha256-line-index-v1",
+    "generated_block_id_scheme": "generated-sha256-v1"
+  },
+  "replay": {
+    "mode": "QUEUED",
+    "speed": 1.0,
+    "cache_visibility": "INFLIGHT_DEDUP_WAIT",
+    "cluster_view": {
+      "mode": "DELAYED",
+      "delay_ms": 1000,
+      "loss_probability": 0
+    }
+  },
+  "cluster": {
+    "prefill_nodes": 4,
+    "decode_nodes": 4,
+    "cache_capacity": {
+      "mode": "FIXED_PER_NODE",
+      "per_node_blocks": 30000
+    }
+  },
+  "selector": {
+    "id": "S7_CACHE_SLO",
+    "capacity_gate": {
+      "hard_enabled": true,
+      "soft_alpha": 1.25
+    },
+    "fallback": {
+      "max_secondary_candidates": 2,
+      "terminal": "LEAST_WORK"
+    }
+  },
+  "eviction": {
+    "id": "E2_SLRU",
+    "protected_fraction": 0.8
+  },
+  "topology": {
+    "mode": "SHARED_KVS",
+    "kvt": {
+      "fixed_latency_ms": 0.2,
+      "bandwidth_gbps": 100,
+      "overlap_ratio": 0.5,
+      "lookup_timeout_probability": 0.001
+    },
+    "remote_capacity_blocks": 200000,
+    "decode_checkpoint_store": {
+      "enabled": true,
+      "capacity_blocks": 100000,
+      "checkpoint_interval_tokens": 16
+    }
+  },
+  "execution": {
+    "handoff_protocol": "P2_GATED_PD",
+    "decode_policy": "D2_COOPERATIVE_PREEMPTION",
+    "recovery_mode": "R2_DECODE_CHECKPOINT",
+    "lease": {
+      "base_tokens": 8,
+      "min_tokens": 4,
+      "max_tokens": 32,
+      "max_rounds": 8,
+      "max_preemptions": 2
+    }
+  },
+  "service_model": {
+    "kind": "NORMALIZED_WORK",
+    "prefill_uncached_token_cost": 1.0,
+    "decode_token_cost": 1.0
+  },
+  "workload_overlay": {
+    "enabled": true,
+    "tenant_distribution": "zipf-v1",
+    "tier_distribution": "strict-standard-relaxed-v1",
+    "deadline_model": "relative-slo-v1"
+  },
+  "metrics": {
+    "cache_hit_units": ["BLOCK_REF", "TOKEN_WEIGHTED"],
+    "goodput": {
+      "enabled": true,
+      "primary": "STRICT_COMPLETED",
+      "report_lenient": true,
+      "report_partial_output": true,
+      "weights": {
+        "strict": 2.0,
+        "standard": 1.0,
+        "relaxed": 0.5
+      }
+    },
+    "report_replica_factor": true
+  },
+  "output": {
+    "directory": "results/phase-d-kvs-gated-pd-d2",
+    "formats": ["CSV", "JSON"],
+    "record_decision_trace": true
+  }
+}
