@@ -860,50 +860,58 @@ M1–M4 作为独立可交付：S0／S1／S2＋FIFO／LRU＋正式 hit report �
 
 ### M5｜KVS topology
 
-- [ ] `SHARED_KVS`／`HYBRID` lookup／placement。
-- [ ] local／remote／recompute 分账。
-- [ ] 参数化 KVT fixed latency／bandwidth／overlap。
-- [ ] remote store capacity／replica／eviction。
-- [ ] KVS timeout／unknown fail-open。
-- [ ] hot block transfer hotspot metric。
-- [ ] `S6-KVS／MooncakeAlgo1` 严格复刻＋`kvcache_balancing_threshold` sensitivity。
+- [x] `SHARED_KVS`／`HYBRID` lookup／placement。
+- [x] local／remote／recompute 分账。
+- [x] 参数化 KVT fixed latency／bandwidth／overlap。
+- [x] remote store capacity／replica／eviction。
+- [x] KVS timeout／unknown fail-open。
+- [x] hot block transfer hotspot metric。
+- [x] `S6-KVS／MooncakeAlgo1` 严格复刻＋`kvcache_balancing_threshold` sensitivity。
 
 交付：bandwidth／capacity sensitivity；回答“要不要借 GPU 量 KVT”。
 
+M5 结论：shared tier 在当前 modeled capacity 下相对 `LOCAL_ONLY` 降低约 4.7% prefill cost；这是“增加 shared tier”的结果，不是 equal-capacity 胜负。最差 KVT corner 仍有约 1.03% modeled gain。M6–M8 排名不需要先借 GPU／RDMA；真实 KVT calibration 留给 M9。完整 30-case CSV 见 `results/m5/`。
+
 ### M6｜Time／SLO model
 
-- [ ] normalized service model：uncached prefill work、decode token work。
-- [ ] `RelativeSloOverlay`。
-- [ ] `TieredSloOverlay`＋tenant overlay＋独立 RNG streams。
-- [ ] PD／DP／gated-PD／gated-DP lifecycle state machine。
-- [ ] hold／reserve／commit／rollback／reject／waste accounting。
-- [ ] strict／lenient completed goodput、partial output、SLO、fairness metrics。
-- [ ] scalar 权重进入 provenance，并做 sensitivity。
+- [x] normalized service model：uncached prefill work、decode token work。
+- [x] `RelativeSloOverlay`。
+- [x] `TieredSloOverlay`＋tenant overlay＋独立 RNG streams。
+- [x] PD／DP／gated-PD／gated-DP lifecycle state machine。
+- [x] hold／reserve／commit／rollback／reject／waste accounting。
+- [x] strict／lenient completed goodput、partial output、SLO、fairness metrics。
+- [x] scalar 权重进入 provenance，并做 sensitivity。
 
 交付：同一 selector 下四 protocol Pareto；不使用未经校准的“真实 ms”措辞。
 
+M6 结论：五种 protocol 已形成不同 timeline／resource ledger，deadline、partial、waste、hold、rollback 与 store cost 均做 conservation test。所有结果只使用 `NORMALIZED_WORK`；49-case CSV 见 `results/m6/`。经过三轮 Opus review 后通过 milestone gate。
+
 ### M7｜Decode lease simulation
 
-- [ ] D0 no lease。
-- [ ] D1 fixed lease，复现当前 `8／8／14`、max-round、kill-switch、failure downgrade invariants。
-- [ ] R0 continuation 通过 `ContinuationPrefixBuilder`＋topology lookup 计算 recompute cost。
-- [ ] R1 exact generated prefix 通过同一 synthetic block chain 计算 KVS-assisted cost。
-- [ ] D1.5 adaptive lease，只在 attempt boundary 调整。
-- [ ] fairness debt／minimum quantum／bounded preemption。
+- [x] D0 no lease。
+- [x] D1 fixed lease，复现当前 `8／8／14`、max-round、kill-switch、failure downgrade invariants。
+- [x] R0 continuation 通过 `ContinuationPrefixBuilder`＋topology lookup 计算 recompute cost。
+- [x] R1 exact generated prefix 通过同一 synthetic block chain 计算 KVS-assisted cost。
+- [x] D1.5 adaptive lease，只在 attempt boundary 调整。
+- [x] fairness debt／minimum quantum／bounded preemption。
 
 交付：D0／D1／D1.5 completed goodput、stall、waste、fairness。
 
+M7 结论：shared K-server queue 可以表达真实 crossover。1 个 D node 的 severe HOL 场景中，D1 strict goodput 从 `0.00718` 提升到 `0.14181`；2 个 D nodes 时 D0 反胜，8 个 D nodes 时基本持平。结论是 pressure-aware enable，不是全局开启 lease。forced migration 的 R0／R1 recovery storm 单列为 sensitivity。完整 11-case CSV 见 `results/m7/`，Opus gate 为 PASS。
+
 ### M8｜Cooperative preemption spike
 
-- [ ] `DecodeCheckpoint` schema：epoch、seq、emitted tokens、KV handle、TPOT、served quantum。
-- [ ] Keep／Move decision＋safety margin。
-- [ ] D action grant：首期只 `report_checkpoint`／`abort_self`。
-- [ ] old epoch late frame drop。
-- [ ] max preemption／min quantum／aging。
-- [ ] `preemptions_per_completed_request` hard gate。
-- [ ] R2 global KV checkpoint 作为独立 topology，不能假设已存在。
+- [x] `DecodeCheckpoint` schema：epoch、seq、emitted tokens、KV handle、TPOT、served quantum。
+- [x] Keep／Move decision＋safety margin。
+- [x] D action grant：首期只 `report_checkpoint`／`abort_self`。
+- [x] old epoch late frame drop。
+- [x] max preemption／min quantum／aging。
+- [x] `preemptions_per_completed_request` hard gate。
+- [x] R2 global KV checkpoint 作为独立 topology，不能假设已存在。
 
 进入条件：M7 通过 G-D1，且 R0／R1 recovery p95 有实测或可信校准。
+
+M8 结论：single-threaded safety spike 已通过 Opus gate；epoch／grant／durability／output fence／minimum quantum／bounded preemption 均有反例测试。trace replay 只支持 ordinal claim：abort rate 随 safety margin 单调下降，且 recovery assumption 会移动 gate crossover。CSV 明示 `ASSUME_RESUME_SUCCESS_UPPER_BOUND`、`SYNTHETIC_SCORE`、`SYNTHETIC_UNCALIBRATED`；不能解读为真实 goodput 或 production-ready。完整 12-case CSV 见 `results/m8/`。
 
 ### M9｜1-GPU calibration
 
