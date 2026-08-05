@@ -830,15 +830,15 @@ Invariant tests：capacity 不超；pinned 不驱逐；hit 不越过首 miss；l
 
 ### M3｜Baseline selectors／eviction
 
-- [ ] S0 Random、S1 RR、S2 LeastWork。
-- [ ] 共用 `CapacityGate`：hard capacity＋`primary_load > α×cluster_mean` soft break。
-- [ ] 共用 `BoundedFallback`：primary／secondary range＋LeastWork fail-open。
-- [ ] S3 GBPrefixBucket：静态 prefix ownership 薄壳。
-- [ ] S4 SessionAffinity：online linker＋hot-block exclusion＋family cap 薄壳。
-- [ ] S5 FlexLB：公式 v1＋top30／similar band／last-selected fairness。
-- [ ] S6 CalibratedTTFT：先用 normalized work model。
-- [ ] E0 FIFO、E1 LRU、E2 SLRU、E3 SecondHitAdmission。
-- [ ] 每次 selection 保留 component trace，可按 request sample debug。
+- [x] S0 Random、S1 RR、S2 LeastWork。
+- [x] 共用 `CapacityGate`：hard capacity＋`primary_load > α×cluster_mean` soft break。
+- [x] 共用 `BoundedFallback`：primary／secondary range＋LeastWork fail-open。
+- [x] S3 GBPrefixBucket：静态 prefix ownership 薄壳。
+- [x] S4 SessionAffinity：online linker＋hot-block exclusion＋family cap 薄壳。
+- [x] S5 FlexLB：公式 v1＋top30／similar band／last-selected fairness。
+- [x] S6 CalibratedTTFT：先用 normalized work model。
+- [x] E0 FIFO、E1 LRU、E2 SLRU、E3 SecondHitAdmission。
+- [x] 每次 selection 保留 component trace，可按 request sample debug。
 
 交付：A1／A2／A3 CSV＋图＋策略排名；CSV schema 从这里稳定，含 trace／config／git SHA、metric unit、replay mode、view mode、visibility；明确 fixed-total 与 fixed-per-node。
 

@@ -24,6 +24,9 @@ class LocalNodeCache:
         self._resident_snapshot: frozenset[BlockRef] = frozenset()
         self._snapshot_dirty = False
         self._history: dict[BlockRef, list[list[float | None]]] = {}
+        self._accesses_since_insert: dict[BlockRef, int] = {}
+        self.eviction_regret = 0
+        self.one_hit_pollution = 0
 
     @property
     def resident_count(self) -> int:
@@ -46,8 +49,14 @@ class LocalNodeCache:
             request.prefix_blocks, request.block_token_sizes, strict=True
         ):
             if block not in self._resident:
+                intervals = self._history.get(block)
+                if intervals and intervals[-1][1] is not None:
+                    self.eviction_regret += 1
                 break
             self._policy.on_lookup(block, now_ms)
+            self._accesses_since_insert[block] = (
+                self._accesses_since_insert.get(block, 0) + 1
+            )
             hit_blocks += 1
             hit_tokens += size
         stranded = sum(
@@ -126,15 +135,19 @@ class LocalNodeCache:
                 capacity_rejected += 1
                 continue
             for victim in victims:
+                if self._accesses_since_insert.get(victim, 0) <= 1:
+                    self.one_hit_pollution += 1
                 self._resident.remove(victim)
                 self._snapshot_dirty = True
                 self._close_interval(victim, now_ms)
                 self._policy.on_remove(victim)
+                self._accesses_since_insert.pop(victim, None)
                 evicted += 1
             self._resident.add(block)
             self._snapshot_dirty = True
             self._history.setdefault(block, []).append([now_ms, None])
             self._policy.on_insert(block, now_ms)
+            self._accesses_since_insert[block] = 0
             inserted += 1
             inserted_this_request.add(block)
         return PlacementResult(

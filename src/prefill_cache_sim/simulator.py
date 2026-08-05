@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import heapq
 import math
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 from .cache import LocalNodeCache
 from .domain import (
@@ -114,8 +115,17 @@ class DecisionRecord:
     hit_blocks: int
     hit_tokens: int
     input_tokens: int
+    stranded_resident_blocks: int
     selection_score: float
+    selection_components: Mapping[str, float | int | str]
     fallback_reason: str | None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "selection_components",
+            MappingProxyType(dict(self.selection_components)),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +151,8 @@ class SimulationReport:
     replica_factor: float
     inflight_wait_tokens: int
     inflight_wait_ms: float
+    eviction_regret: int
+    one_hit_pollution: int
     decisions: tuple[DecisionRecord, ...]
 
 
@@ -187,6 +199,7 @@ class _Event:
     start_ms: float = field(compare=False, default=0.0)
     wait_started_ms: float | None = field(compare=False, default=None)
     wait_tokens: int = field(compare=False, default=0)
+    stranded_resident_blocks: int = field(compare=False, default=0)
 
 
 class LocalSimulator:
@@ -288,7 +301,9 @@ class LocalSimulator:
             selection = self._selector.select(request, self._view(nodes, now, request))
             node = self._node(nodes, selection.node_id)
             lookup = node.cache.lookup(request, now)
-            placement = node.cache.place(request, now, frozenset())
+            placement = node.cache.place(
+                request, now, frozenset(request.prefix_blocks[: lookup.hit_blocks])
+            )
             node.eviction_count += placement.evicted_blocks
             node.rejected_placements += placement.rejected_blocks
             self._account_node(node, request, request.input_tokens - lookup.hit_tokens)
@@ -304,7 +319,9 @@ class LocalSimulator:
                     lookup.hit_blocks,
                     lookup.hit_tokens,
                     request.input_tokens,
+                    lookup.stranded_resident_blocks,
                     selection.score,
+                    selection.components,
                     selection.fallback_reason,
                 )
             )
@@ -420,6 +437,7 @@ class LocalSimulator:
                 lookup.hit_blocks,
                 lookup.hit_tokens,
                 event.time_ms,
+                stranded_resident_blocks=lookup.stranded_resident_blocks,
             ),
         )
         return sequence + 1
@@ -462,7 +480,9 @@ class LocalSimulator:
                 event.hit_blocks,
                 event.hit_tokens,
                 event.request.input_tokens,
+                event.stranded_resident_blocks,
                 event.selection.score,
+                event.selection.components,
                 event.selection.fallback_reason,
             )
         )
@@ -567,5 +587,7 @@ class LocalSimulator:
             replica_factor,
             sum(node.inflight_wait_tokens for node in nodes),
             sum(node.inflight_wait_ms for node in nodes),
+            sum(node.cache.eviction_regret for node in nodes),
+            sum(node.cache.one_hit_pollution for node in nodes),
             decisions,
         )
