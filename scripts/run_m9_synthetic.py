@@ -1,0 +1,357 @@
+#!/usr/bin/env python3
+"""Run the M9 calibration harness against the mock engine.
+
+This is a SYNTHETIC_REPLAY artifact: the sweep grid is anchored on the real
+Mooncake trace token distribution and the fitted curves are replayed over the
+real trace, but every measurement comes from :class:`MockEngine`. No hardware
+was touched, so the artifact stays SYNTHETIC_UNCALIBRATED in NORMALIZED_WORK.
+"""
+
+from __future__ import annotations
+
+import csv
+import hashlib
+import io
+import json
+import math
+import os
+import shutil
+import tempfile
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+
+from prefill_cache_sim.calibration import (
+    CALIBRATION_SCHEMA_VERSION,
+    DISTRIBUTION_ASSUMPTION,
+    CalibrationParams,
+    CalibrationStatus,
+    EvidenceTier,
+    LinearFit,
+    MachineProvenance,
+    MockCurve,
+    MockEngine,
+    SweepKind,
+    SweepSpec,
+    TimeUnit,
+    fit_sweep,
+    run_sweep,
+    source_manifest,
+)
+from prefill_cache_sim.config import git_provenance
+from prefill_cache_sim.trace import load_trace, to_simulation_requests
+
+BATCH_POINTS = (1, 2, 4, 8, 16)
+GRID_QUANTILES = (0.10, 0.25, 0.50, 0.75, 0.90, 0.99)
+NOISE_AMPLITUDE = 0.5
+SEED = 20260805
+REPEATS = 3
+REPLAY_BATCH_SIZE = 8
+REPLAY_ASSUMPTION = "ASSUME_ZERO_CACHE_HIT_UPPER_BOUND"
+EVIDENCE_TIER = EvidenceTier.SYNTHETIC_REPLAY
+
+#: Digest index over every other artifact, written last so a torn set is
+#: detectable rather than silently mixing two runs.
+MANIFEST_NAME = "MANIFEST.json"
+MANIFEST_SCHEMA_VERSION = "m9-artifact-manifest-v1"
+
+
+def _nearest_rank(ordered: list[int], quantile: float) -> int:
+    index = max(1, math.ceil(quantile * len(ordered))) - 1
+    return ordered[index]
+
+
+def _token_points(values: list[int]) -> tuple[int, ...]:
+    """Anchor the sweep axis on real trace quantiles, deduplicated and sorted."""
+    ordered = sorted(values)
+    points = sorted({_nearest_rank(ordered, q) for q in GRID_QUANTILES})
+    return tuple(point for point in points if point > 0)
+
+
+def _grid_coverage(values: list[int], points: tuple[int, ...]) -> dict[str, object]:
+    """Measure how far the replayed trace falls outside the swept grid.
+
+    The fitted curves are linear, so predicting outside ``points`` is pure
+    extrapolation: nothing was measured there. Publishing the fractions keeps a
+    reader from mistaking an extrapolated mean for an interpolated one.
+    """
+    low, high = points[0], points[-1]
+    total = len(values)
+    return {
+        "grid_min": low,
+        "grid_max": high,
+        "trace_min": min(values),
+        "trace_max": max(values),
+        "below_grid_fraction": sum(1 for value in values if value < low) / total,
+        "above_grid_fraction": sum(1 for value in values if value > high) / total,
+        "max_over_grid_ratio": max(values) / high,
+    }
+
+
+def _fit_row(fit: LinearFit, params: CalibrationParams) -> dict[str, object]:
+    return {
+        "case_id": f"M9-{fit.kind.value}",
+        "sweep_kind": fit.kind.value,
+        "intercept": fit.intercept,
+        "token_coefficient": fit.token_coefficient,
+        "batch_coefficient": fit.batch_coefficient,
+        "observation_count": fit.observation_count,
+        "residual_distribution_assumption": fit.residuals.distribution_assumption,
+        "residual_p50": fit.residuals.p50,
+        "residual_p90": fit.residuals.p90,
+        "residual_p95": fit.residuals.p95,
+        "residual_p99": fit.residuals.p99,
+        "residual_min": fit.residuals.minimum,
+        "residual_max": fit.residuals.maximum,
+        "residual_max_abs": fit.residuals.maximum_absolute,
+        "residual_mean_abs": fit.residuals.mean_absolute,
+        "endpoint_id": params.endpoint_id,
+        "calibration_status": params.calibration_status.value,
+        "time_unit": params.time_unit.value,
+        "evidence_tier": params.evidence_tier.value,
+        "schema_version": params.schema_version,
+    }
+
+
+def _json_bytes(payload: object) -> bytes:
+    # allow_nan=False: bare NaN/Infinity literals are not valid JSON, so a
+    # poisoned fit must fail loudly here instead of shipping an unparseable file.
+    return (
+        json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    ).encode("utf-8")
+
+
+def _csv_bytes(rows: Sequence[Mapping[str, object]]) -> bytes:
+    # newline="" keeps csv's own \r\n terminators intact, exactly as writing
+    # through an opened file handle would, so the bytes are the artifact.
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=list(rows[0]))
+    writer.writeheader()
+    writer.writerows(rows)
+    return buffer.getvalue().encode("utf-8")
+
+
+def _manifest_bytes(artifacts: Mapping[str, bytes]) -> bytes:
+    return _json_bytes(
+        {
+            "schema_version": MANIFEST_SCHEMA_VERSION,
+            "algorithm": "sha256",
+            "note": (
+                "Digests of the artifacts generated by this run. This file is "
+                "replaced last, so a reader that observes a digest mismatch is "
+                "looking at a partially replaced set, not at one run's output."
+            ),
+            "files": {
+                name: hashlib.sha256(payload).hexdigest()
+                for name, payload in sorted(artifacts.items())
+            },
+        }
+    )
+
+
+def _write_artifacts(output_dir: Path, artifacts: Mapping[str, bytes]) -> None:
+    """Stage every artifact in a temp directory, then move them into place.
+
+    Replacing the whole directory in one rename would be atomic, but it would
+    also delete files this script does not generate -- ``PROVENANCE.md`` is
+    hand-written and lives here -- so each file is replaced individually with
+    :func:`os.replace`. The staging directory is a sibling of the output
+    directory to keep those renames on one filesystem, where they are atomic.
+
+    Honest limitation: per-file renames leave a window in which a concurrent
+    reader could see files from two runs. ``MANIFEST.json`` is written last and
+    carries the digest of every other artifact, so such a reader can detect the
+    mix instead of silently trusting it.
+    """
+    if MANIFEST_NAME not in artifacts:
+        raise RuntimeError(f"artifact set must include {MANIFEST_NAME}")
+    ordered = [name for name in sorted(artifacts) if name != MANIFEST_NAME]
+    ordered.append(MANIFEST_NAME)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(dir=output_dir.parent, prefix=".m9-staging-"))
+    try:
+        for name in ordered:
+            (staging / name).write_bytes(artifacts[name])
+        for name in ordered:
+            os.replace(staging / name, output_dir / name)
+    finally:
+        # Only the staging directory is ever removed; the output directory and
+        # anything in it that this script did not generate are left untouched.
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def main() -> int:
+    root = Path(__file__).resolve().parents[1]
+    loaded = load_trace(root / "mooncake_trace.jsonl", block_size_tokens=512)
+    requests = to_simulation_requests(loaded)
+    provenance = git_provenance(root)
+
+    prefill_spec = SweepSpec(
+        SweepKind.PREFILL,
+        token_points=_token_points([item.input_tokens for item in requests]),
+        batch_points=BATCH_POINTS,
+        repeats=REPEATS,
+    )
+    decode_spec = SweepSpec(
+        SweepKind.DECODE,
+        token_points=_token_points([item.output_tokens for item in requests]),
+        batch_points=BATCH_POINTS,
+        repeats=REPEATS,
+    )
+
+    engine = MockEngine(
+        endpoint_id="mock-engine-m9",
+        prefill_curve=MockCurve(3.0, 0.02, 1.5),
+        tpot_curve=MockCurve(8.0, 0.0004, 0.9),
+        noise_amplitude=NOISE_AMPLITUDE,
+        seed=SEED,
+    )
+    prefill_observations = run_sweep(engine, prefill_spec)
+    decode_observations = run_sweep(engine, decode_spec)
+    prefill_fit = fit_sweep(prefill_observations)
+    tpot_fit = fit_sweep(decode_observations)
+
+    machine = engine.machine_provenance()
+    params = CalibrationParams(
+        endpoint_id=engine.endpoint_id,
+        machine=machine,
+        calibration_status=CalibrationStatus.SYNTHETIC_UNCALIBRATED,
+        time_unit=TimeUnit.NORMALIZED_WORK,
+        evidence_tier=EVIDENCE_TIER,
+        prefill=prefill_fit,
+        tpot=tpot_fit,
+        code_sha=provenance.sha,
+        code_dirty=provenance.dirty,
+    )
+
+    # Fail before writing anything: a published artifact that claims hardware it
+    # never touched is worse than no artifact. `assert` would be stripped by -O.
+    if machine != MachineProvenance.unknown():
+        raise RuntimeError(
+            "this script drives a mock engine and must not report machine "
+            f"provenance, got {machine.to_dict()}"
+        )
+    if params.calibration_status is not CalibrationStatus.SYNTHETIC_UNCALIBRATED:
+        raise RuntimeError("synthetic run must stay SYNTHETIC_UNCALIBRATED")
+    if params.time_unit is not TimeUnit.NORMALIZED_WORK:
+        raise RuntimeError("synthetic run must stay in NORMALIZED_WORK")
+    if CalibrationParams.from_dict(params.to_dict()) != params:
+        raise RuntimeError("calibration params failed to round-trip through to_dict")
+
+    output_dir = root / "results/m9-synthetic"
+
+    params_payload = {
+        "params": params.to_dict(),
+        "sweeps": {
+            "prefill": prefill_spec.to_dict(),
+            "decode": decode_spec.to_dict(),
+        },
+        "mock_ground_truth": {
+            "prefill": {
+                "intercept": engine.prefill_curve.intercept,
+                "token_coefficient": engine.prefill_curve.token_coefficient,
+                "batch_coefficient": engine.prefill_curve.batch_coefficient,
+            },
+            "tpot": {
+                "intercept": engine.tpot_curve.intercept,
+                "token_coefficient": engine.tpot_curve.token_coefficient,
+                "batch_coefficient": engine.tpot_curve.batch_coefficient,
+            },
+            "noise_amplitude": engine.noise_amplitude,
+            "seed": engine.seed,
+        },
+        "provenance": {
+            "trace_sha256": loaded.sha256,
+            "trace_requests": len(requests),
+            "block_size_tokens": 512,
+            "git_sha": provenance.sha,
+            "git_dirty": provenance.dirty,
+            # The generator and the calibration package are untracked at this
+            # commit, so git_sha alone does not identify the code that produced
+            # these numbers. These digests do; see the embedded note.
+            "source_fingerprints": source_manifest(root),
+            "evidence_tier": EVIDENCE_TIER.value,
+            "calibration_status": params.calibration_status.value,
+            "time_unit": params.time_unit.value,
+            "distribution_assumption": DISTRIBUTION_ASSUMPTION,
+            "schema_version": CALIBRATION_SCHEMA_VERSION,
+            "kvt_benchmark": "DEFERRED_PER_M5",
+        },
+    }
+
+    rows = [_fit_row(prefill_fit, params), _fit_row(tpot_fit, params)]
+    for row in rows:
+        row["trace_sha256"] = loaded.sha256
+        row["git_sha"] = provenance.sha or ""
+        row["git_dirty"] = provenance.dirty
+        row["kvt_benchmark"] = "DEFERRED_PER_M5"
+
+    observation_rows = [
+        {
+            **observation.to_dict(),
+            "residual": residual,
+            "endpoint_id": engine.endpoint_id,
+            "calibration_status": params.calibration_status.value,
+            "time_unit": params.time_unit.value,
+            "evidence_tier": EVIDENCE_TIER.value,
+        }
+        for fit, observations in (
+            (prefill_fit, prefill_observations),
+            (tpot_fit, decode_observations),
+        )
+        for observation, residual in zip(observations, fit.residuals.raw, strict=True)
+    ]
+
+    prefill_coverage = _grid_coverage(
+        [item.input_tokens for item in requests], prefill_spec.token_points
+    )
+    decode_coverage = _grid_coverage(
+        [item.output_tokens for item in requests], decode_spec.token_points
+    )
+
+    replay_rows = []
+    for label, batch_size in (("b1", 1), ("b8", REPLAY_BATCH_SIZE), ("b16", 16)):
+        prefill_costs = [
+            prefill_fit.predict(tokens=item.input_tokens, batch_size=batch_size)
+            for item in requests
+        ]
+        decode_costs = [
+            tpot_fit.predict(tokens=item.output_tokens, batch_size=batch_size)
+            * item.output_tokens
+            for item in requests
+        ]
+        replay_rows.append(
+            {
+                "case_id": f"M9-REPLAY-{label}",
+                "batch_size": batch_size,
+                "replayed_requests": len(requests),
+                "mean_predicted_prefill_work": sum(prefill_costs) / len(prefill_costs),
+                "mean_predicted_decode_work": sum(decode_costs) / len(decode_costs),
+                "prefill_input_assumption": REPLAY_ASSUMPTION,
+                "batch_size_within_grid": batch_size in BATCH_POINTS,
+                **{f"prefill_{key}": value for key, value in prefill_coverage.items()},
+                **{f"decode_{key}": value for key, value in decode_coverage.items()},
+                "calibration_status": params.calibration_status.value,
+                "time_unit": params.time_unit.value,
+                "evidence_tier": EVIDENCE_TIER.value,
+                "trace_sha256": loaded.sha256,
+                "git_sha": provenance.sha or "",
+                "git_dirty": provenance.dirty,
+            }
+        )
+    artifacts = {
+        "params.json": _json_bytes(params_payload),
+        "results.csv": _csv_bytes(rows),
+        "observations.csv": _csv_bytes(observation_rows),
+        "trace_replay.csv": _csv_bytes(replay_rows),
+    }
+    artifacts[MANIFEST_NAME] = _manifest_bytes(artifacts)
+    _write_artifacts(output_dir, artifacts)
+
+    for name in sorted(artifacts):
+        print(f"wrote {output_dir / name} ({len(artifacts[name])} bytes)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
