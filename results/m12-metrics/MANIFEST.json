@@ -1,8 +1,8 @@
 {
   "files": {
-    "contract.json": "954d918773898b04ab57b184f23335dc67f1bd1100468b8f35ea31df0c53317e",
+    "contract.json": "b8f939833b422f00b9b3266c537272c9493319bd226c1ec8d313b7c11329fd1d",
     "regime_grid.csv": "3934b881f61012b6b98a4a78e925abc08fa5d83215b0b81332f4cf46e8be236c",
-    "validation.json": "bb465df9b03bb201c8d59f80595ef46f25fd9cd5edffd969ed1fb0f6bf561f6d"
+    "validation.json": "0e8a1b75517954998a30f2fb9e1de716a53efdc45db9fd1bdba1c046ad923b58"
   },
-  "schema_version": "m12-metrics-manifest-v1"
+  "schema_version": "m12-metrics-manifest-v1.1"
 }
