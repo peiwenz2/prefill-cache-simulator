@@ -23,6 +23,10 @@ be labelled :data:`~..calibration.EvidenceTier.HW_VALIDATED` or timed in
 ``fingerprint``
     SHA-256 digests of the sources that produced an artifact, because the
     recorded commit does not identify untracked code.
+``hardware``
+    The M10-HW gate. Everything above is reachable on a laptop; this module
+    decides whether a particular run earned the right to say otherwise, and
+    names the reasons it did not.
 """
 
 from .faults import (
@@ -39,6 +43,20 @@ from .fingerprint import (
     m10_source_paths,
     source_fingerprints,
     source_manifest,
+)
+from .hardware import (
+    DEFAULT_REPLAY_HARDWARE_GATE,
+    FROZEN_PLAN_DIGEST,
+    REPLAY_BLOCKER_ORDER,
+    REPLAY_HARDWARE_GATE_SCHEMA_VERSION,
+    REPLAY_HARDWARE_SCHEMA_VERSION,
+    REQUIRED_CALIBRATION_TIER,
+    ReplayBlocker,
+    ReplayHardwareEvidence,
+    ReplayHardwareGate,
+    ReplayHardwareReport,
+    plan_digest,
+    replay_blockers,
 )
 from .orchestrator import (
     ARRIVAL_SCALES,
@@ -115,9 +133,11 @@ __all__ = [
     "BASELINE_ARM_ID",
     "CANDIDATE_DOES_NOT_BEAT_BASELINE",
     "DEFAULT_ARMS",
+    "DEFAULT_REPLAY_HARDWARE_GATE",
     "DEFAULT_SHADOW_GATE",
     "DISAGREEMENT_FRACTION_ABOVE_GATE",
     "ENFORCEMENT_ENABLED",
+    "FROZEN_PLAN_DIGEST",
     "FROZEN_RANKING_STATISTIC",
     "M4_WINNER_ARM_ID",
     "RANKING_CONSISTENCY_BELOW_GATE",
@@ -125,9 +145,13 @@ __all__ = [
     "RANKING_SCHEMA_VERSION",
     "RECONCILED_FRACTION_BELOW_GATE",
     "RECONCILE_SCHEMA_VERSION",
+    "REPLAY_BLOCKER_ORDER",
+    "REPLAY_HARDWARE_GATE_SCHEMA_VERSION",
+    "REPLAY_HARDWARE_SCHEMA_VERSION",
     "REPLAY_SCHEMA_VERSION",
     "REPRODUCIBILITY_CLAIM",
     "REPRODUCIBILITY_NOTE",
+    "REQUIRED_CALIBRATION_TIER",
     "SCORE_METRICS",
     "SHADOW_GATE_SCHEMA_VERSION",
     "SHADOW_REASON_ORDER",
@@ -151,7 +175,11 @@ __all__ = [
     "ReconciledRow",
     "ReconciliationReport",
     "ReplayArm",
+    "ReplayBlocker",
     "ReplayCell",
+    "ReplayHardwareEvidence",
+    "ReplayHardwareGate",
+    "ReplayHardwareReport",
     "ReplayOutcome",
     "ReplayPlan",
     "ShadowDecision",
@@ -174,7 +202,9 @@ __all__ = [
     "m10_source_paths",
     "outcome_for",
     "pairwise_winner_agreement",
+    "plan_digest",
     "reconcile",
+    "replay_blockers",
     "run_replay",
     "source_fingerprints",
     "source_manifest",

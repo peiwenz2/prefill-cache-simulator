@@ -74,7 +74,9 @@ def runtime_identity() -> dict[str, str]:
     }
 
 
-def m9_source_paths(root: Path) -> tuple[str, ...]:
+def m9_source_paths(
+    root: Path, generator_path: str = GENERATOR_PATH
+) -> tuple[str, ...]:
     """Enumerate the M9 sources, discovering package modules rather than listing them.
 
     A hand-maintained list silently stops covering a module on the day someone
@@ -82,22 +84,30 @@ def m9_source_paths(root: Path) -> tuple[str, ...]:
     the calibration package is globbed. The out-of-package dependencies in
     :data:`DEPENDENCY_PATHS` cannot be discovered the same way without dragging
     in the whole simulator, so they stay explicit.
+
+    ``generator_path`` is a parameter rather than a constant because M9 now has
+    more than one generator: the synthetic sweep and the hardware runner produce
+    different artifacts from the same package. Recording whichever one ran keeps
+    the manifest a description of the run instead of a description of the
+    package.
     """
     package = root / PACKAGE_DIR
     if not package.is_dir():
         raise FileNotFoundError(f"calibration package not found at {package}")
     modules = sorted(item.name for item in package.glob("*.py"))
     return (
-        GENERATOR_PATH,
+        generator_path,
         *(f"{PACKAGE_DIR}/{name}" for name in modules),
         *DEPENDENCY_PATHS,
     )
 
 
-def source_fingerprints(root: Path) -> dict[str, str]:
+def source_fingerprints(
+    root: Path, generator_path: str = GENERATOR_PATH
+) -> dict[str, str]:
     """Map each M9 source path to the SHA-256 of its bytes on disk."""
     fingerprints: dict[str, str] = {}
-    for relative in m9_source_paths(root):
+    for relative in m9_source_paths(root, generator_path):
         path = root / relative
         if not path.is_file():
             raise FileNotFoundError(f"M9 source {relative} not found at {path}")
@@ -121,11 +131,12 @@ def combined_digest(fingerprints: Mapping[str, str]) -> str:
     return digest.hexdigest()
 
 
-def source_manifest(root: Path) -> dict[str, Any]:
+def source_manifest(root: Path, generator_path: str = GENERATOR_PATH) -> dict[str, Any]:
     """Build the provenance block that records the fingerprinted sources."""
-    fingerprints = source_fingerprints(root)
+    fingerprints = source_fingerprints(root, generator_path)
     return {
         "algorithm": ALGORITHM,
+        "generator": generator_path,
         "reproducibility_claim": REPRODUCIBILITY_CLAIM,
         "note": REPRODUCIBILITY_NOTE,
         "combined_digest": combined_digest(fingerprints),

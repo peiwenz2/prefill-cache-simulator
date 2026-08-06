@@ -915,23 +915,31 @@ M8 结论：single-threaded safety spike 已通过 Opus gate；epoch／grant／d
 
 ### M9｜1-GPU calibration
 
-- [ ] 扫 uncached input tokens／batch state，拟合 `prefill_ms`。
-- [ ] 扫 output length／batch state，拟合 TPOT／decode work。
-- [ ] 记录 estimate residual，不强行正态。
-- [ ] 如 M5 敏感，再加 KVT benchmark；否则不借 RDMA 集群。
-- [ ] simulator 参数版本化。
+代码就绪，执行 BLOCKED_NO_ENGINE_ACCESS（本仓库无 accelerator 访问）：
+
+- [x] 版本化 hardware gate、endpoint contract、transport seam：`calibration/hardware.py`（`HARDWARE_SCHEMA_VERSION = m9-hardware-v1`）、`calibration/transport.py`（`HttpJsonTransport` 拒绝 `file://`、`StubTransport`）、`calibration/http_endpoint.py`（`/v1/describe`＋`/v1/measure`、echo 校验）。CPU 可跑通 plumbing，不可产出 GPU calibration。
+- [x] `scripts/run_m9_hardware.py`：无 `--endpoint-url` 时写出 `BLOCKED_NO_ENGINE_ACCESS` 报告到 `results/m9-hardware-blocked/`，exit 2；accepted 路径永不触及——synthetic 无法获得 `HW_CALIBRATED`／`HW_VALIDATED`（`endpoint_is_synthetic` exact-type 检查）。
+- [x] atomic artifacts/manifests（`os.replace` staging，`MANIFEST.json` 最后写入）；`validate-only handshake`（`--dry-run` → `BLOCKED_DRY_RUN_ONLY`）；require complete `MachineProvenance`（`HardwareContext.complete`）。
+- [x] tests：gate（accepted/blocked/round-trip/hand-edited rejected）、transport（scheme/timeout/stub）、endpoint（describe/measure/echo mismatch）、script blocked path。见 `tests/test_hardware.py`。
+- [ ] **执行 G0→G1**：G0 = 1 台目标机型 engine access；G1 = 产出 accepted `results/m9-hardware/`（`HW_CALIBRATED`）。Tooling complete，stage not passed。当前环境不可执行。
 
 机器：先 1 台目标机型；此阶段不需要 4P+4D。
 
+M9 结论：hardware harness 代码就绪并测试（tooling complete）；但无 accelerator 访问，所有 blocker 以机器可读方式发布（`HardwareBlocker` StrEnum），`BLOCKED_NO_ENGINE_ACCESS` 为当前 honest 结果而非 failure。CPU 可验证 plumbing（handshake、gate 逻辑、artifact 原子写），不可产出 GPU calibration。Gate 顺序：G0 = engine access；G1 = accepted M9-HW（`HW_CALIBRATED`）。Tooling complete ≠ stage passed。
+
 ### M10｜Multi-GPU replay
 
-- [ ] N=4 P＋D pool，trace 1×／2× replay。
-- [ ] Random／S3／S5／winner 对照。
-- [ ] engine hit 真值、client TTFT／TPOT、attempt trace 三源对账。
-- [ ] shadow gated decision，不 enforce。
-- [ ] simulator vs real 排名一致性。
+代码就绪，执行 BLOCKED_NO_ENGINE_ACCESS（依赖 accepted M9-HW）：
+
+- [x] 版本化 replay hardware gate（`replay/hardware.py`，`REPLAY_HARDWARE_SCHEMA_VERSION = m10-hardware-v1`）：frozen plan digest（`plan_digest(ReplayPlan()) == FROZEN_PLAN_DIGEST`）、tau-b gate、reconciliation fractions、fault-injection detection；accepted M9-HW prerequisite（`REQUIRED_CALIBRATION_TIER = HW_CALIBRATED`）。
+- [x] `scripts/run_m10_hardware.py`：无 `--calibration`／`--observed` 时写 `BLOCKED_NO_ENGINE_ACCESS` 到 `results/m10-hardware-blocked/`，exit 2；modeled 侧永远 `SYNTHETIC_REPLAY`／`NORMALIZED_WORK`。
+- [x] atomic artifacts/manifests；`HW_VALIDATED` 只允许出现在 accepted `GATE.json`；`_assert_no_stronger_claim` 逐 artifact 扫描，per-artifact permission；worst-cell aggregation（tau-b／reconciliation）。
+- [x] tests：gate、report round-trip、hand-edited rejected、script blocked path、dry-run。见 `tests/test_hardware.py`。
+- [ ] **执行 G2**：accepted M9-HW (G1) + measured engine bundles + M10-HW measured replay。Production rollout gates: R0 metrics → R1 3-day shadow → R2 canary（selector 与 baseline 差异可解释、无新增 error）。Tooling complete，stage not passed。当前环境不可执行。
 
 通过后才决定是否接 LLMClientV1 enforce／Decode D2。
+
+M10 结论：replay hardware gate 代码就绪并测试（tooling complete）；但无 engine 访问，`BLOCKED_NO_ENGINE_ACCESS` 为 honest 结果。synthetic 无法获得 `HW_VALIDATED`；modeled 侧永远 `SYNTHETIC_REPLAY`。Gate 顺序：G2 = M10-HW measured replay（依赖 G1 accepted M9-HW）。Production rollout: R0 metrics → R1 3-day shadow → R2 canary。Tooling complete ≠ stage passed。Q5/Q6/Turbo pull-mode unresolved（见 M11 RFC §10）。
 
 ### M11｜Production implementation，另立 RFC／MR
 
@@ -946,6 +954,7 @@ RFC 与 chain mock 部分（本仓库内可交付）：
 - [x] chain mock：timeout、stale view、P rollback、D reject、lease expiry、late frame、client crash 七场景，另有敌意用例（superseded-leg race、sibling admission 拒绝、leg-bound checkpoint、max_rounds fence、无 durable ack、epoch 回退 view、伪造 epoch、budget 耗尽）。见 `src/prefill_cache_sim/chain/scenarios.py`、`tests/test_chain_mocks.py`。
 - [x] fail-open 边界与 capability／version handshake 定义；未握手默认零 capability，不推断——未握手或缺 `PREFIX_CACHE_QUERY` 时 selection 的 hit 项按 0 计、退回 baseline 顺序且不发布 selector score；`served_quantum=0` 拒绝而非改写。见 RFC §5、§6、§7。
 - [x] canary 看 completed goodput／waste／fairness，不只看 hit。见 RFC §8、§9。
+- [x] R0/R1 decision logging：`chain/decision_log.py`。versioned privacy-safe `DecisionRecord`（online+shadow、feature/view/capability/fallback/timing、`logical_request_id`+`attempt_index`、enforcement OFF）；bounded-cardinality metrics（`DECISION_METRIC_NAMES` closed vocabulary）；append-only crash-safe JSONL sink with injectable clock；R1 `PairReporter`＋`DiffReport` with atomic artifact/gate；structural no-enforce（`DecisionEnforcementError` on `enforced=True`）；generic `PushObserver` protocol wired into `ChainHarness._finalize_selection`。Turbo pull shadow = `PairStatus.UNRESOLVED_OWNER_SIGNOFF`（machine-readable，需 owner sign-off；Q5/Q6 unresolved）。WHERE 与 lifecycle/output authority 分离已落实。见 `tests/test_decision_log.py`。
 
 Production 部分（本次不做，保持未完成）：
 

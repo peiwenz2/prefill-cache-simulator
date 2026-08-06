@@ -20,6 +20,10 @@ class CalibrationStatus(StrEnum):
 
     SYNTHETIC_UNCALIBRATED = "SYNTHETIC_UNCALIBRATED"
     HW_CALIBRATED = "HW_CALIBRATED"
+    #: A run whose thresholds were overridden on the CLI. It may have measured
+    #: a real engine, but the policy that judged it was not the reviewed one, so
+    #: it must never be described as a calibration or a validation.
+    NON_PRODUCTION_EXPERIMENT = "NON_PRODUCTION_EXPERIMENT"
 
 
 class TimeUnit(StrEnum):
@@ -34,6 +38,10 @@ class EvidenceTier(StrEnum):
 
     HARNESS_ONLY = "HARNESS_ONLY"
     SYNTHETIC_REPLAY = "SYNTHETIC_REPLAY"
+    #: A real engine was reached and measured over HTTP, but the endpoint was
+    #: not production-trusted (plain HTTP, or host not in the allowlist). The
+    #: measurements are real but cannot issue HW_CALIBRATED or HW_VALIDATED.
+    REMOTE_REPORTED = "REMOTE_REPORTED"
     HW_VALIDATED = "HW_VALIDATED"
 
 
@@ -179,6 +187,16 @@ HONEST_LABEL_TUPLES: frozenset[tuple[CalibrationStatus, TimeUnit, EvidenceTier]]
             ),
             (
                 CalibrationStatus.SYNTHETIC_UNCALIBRATED,
+                TimeUnit.NORMALIZED_WORK,
+                EvidenceTier.SYNTHETIC_REPLAY,
+            ),
+            (
+                CalibrationStatus.SYNTHETIC_UNCALIBRATED,
+                TimeUnit.NORMALIZED_WORK,
+                EvidenceTier.REMOTE_REPORTED,
+            ),
+            (
+                CalibrationStatus.NON_PRODUCTION_EXPERIMENT,
                 TimeUnit.NORMALIZED_WORK,
                 EvidenceTier.SYNTHETIC_REPLAY,
             ),

@@ -68,12 +68,18 @@ def runtime_identity() -> dict[str, str]:
     }
 
 
-def m10_source_paths(root: Path) -> tuple[str, ...]:
+def m10_source_paths(
+    root: Path, generator_path: str = GENERATOR_PATH
+) -> tuple[str, ...]:
     """Enumerate the M10 sources by walking the package rather than listing it.
 
     ``rglob`` rather than a hand-maintained tuple: a list stops covering a module
     on the day someone adds one, which is exactly the change a fingerprint exists
     to catch. ``__pycache__`` is skipped because it is derived, not source.
+
+    ``generator_path`` is a parameter because M10 now has two generators, the
+    synthetic replay and the hardware runner, and the manifest should name the
+    one that ran rather than the one this module was written for.
     """
     package = root / PACKAGE_ROOT
     if not package.is_dir():
@@ -85,13 +91,15 @@ def m10_source_paths(root: Path) -> tuple[str, ...]:
     )
     if not modules:
         raise FileNotFoundError(f"no modules found under {package}")
-    return (GENERATOR_PATH, *modules)
+    return (generator_path, *modules)
 
 
-def source_fingerprints(root: Path) -> dict[str, str]:
+def source_fingerprints(
+    root: Path, generator_path: str = GENERATOR_PATH
+) -> dict[str, str]:
     """Map each M10 source path to the SHA-256 of its bytes on disk."""
     fingerprints: dict[str, str] = {}
-    for relative in m10_source_paths(root):
+    for relative in m10_source_paths(root, generator_path):
         path = root / relative
         if not path.is_file():
             raise FileNotFoundError(f"M10 source {relative} not found at {path}")
@@ -115,11 +123,12 @@ def combined_digest(fingerprints: Mapping[str, str]) -> str:
     return digest.hexdigest()
 
 
-def source_manifest(root: Path) -> dict[str, Any]:
+def source_manifest(root: Path, generator_path: str = GENERATOR_PATH) -> dict[str, Any]:
     """Build the provenance block that records the fingerprinted sources."""
-    fingerprints = source_fingerprints(root)
+    fingerprints = source_fingerprints(root, generator_path)
     return {
         "algorithm": ALGORITHM,
+        "generator": generator_path,
         "reproducibility_claim": REPRODUCIBILITY_CLAIM,
         "note": REPRODUCIBILITY_NOTE,
         "combined_digest": combined_digest(fingerprints),

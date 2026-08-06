@@ -41,6 +41,7 @@ Nothing here measures anything. See :data:`~.protocol.CHAIN_EVIDENCE_NOTE`.
 
 from __future__ import annotations
 
+import contextlib
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -56,6 +57,11 @@ from ..preemption import (
     KeepMoveInput,
     OutputAuthority,
     R2CheckpointStore,
+)
+from .decision_log import (
+    DECISION_SCHEMA_VERSION,
+    DecisionRecord,
+    PushObserver,
 )
 from .protocol import (
     D2_GATE_CLOSED,
@@ -192,6 +198,7 @@ class ChainHarness:
         input_tokens: int = 128,
         output_tokens: int = 30,
         kv_handle: str = "kv-0",
+        observer: PushObserver | None = None,
     ) -> None:
         if input_tokens < 0 or output_tokens <= 0:
             raise ValueError("input tokens and output target must be sane")
@@ -201,6 +208,7 @@ class ChainHarness:
         self.original_input_tokens = input_tokens
         self.output_target = output_tokens
         self.kv_handle = kv_handle
+        self._observer = observer
         self.store = R2CheckpointStore()
         self._durable = DurableClientLedger()
         self._authority = OutputAuthority()
@@ -435,12 +443,73 @@ class ChainHarness:
         )
         self._selections.append(selection)
         self._current_host = host
+        self._push_decision(snapshot, route, host, scored, reason)
         self._record(
             ChainEventKind.SELECT,
             ChainRole.SELECTOR_OWNER,
             f"{host} outcome={outcome.value} pref_ignored={ignored}",
         )
         return selection
+
+    def _push_decision(
+        self,
+        snapshot: ViewSnapshot,
+        route: LegRoute,
+        host: str,
+        scored: str | None,
+        reason: FailOpenReason | None,
+    ) -> None:
+        # Build a privacy-safe DecisionRecord and push it to the observer, if
+        # one was attached. The record carries no user content: the request
+        # identity is the trace-derived logical id, the features are bounded-
+        # cardinality score components, and the timing is zeroed here because
+        # the sink stamps it with the injected clock.
+        if self._observer is None:
+            return
+        online = baseline_host(snapshot, route)
+        feature: dict[str, float] = {}
+        try:
+            feature["cache_hit_tokens"] = float(snapshot.hit_tokens(host))
+        except ValueError:
+            feature["cache_hit_tokens"] = 0.0
+        if scored is not None:
+            # shadow_hit_tokens stores the cached-token count for the host the
+            # selector *would have* chosen, not a synthesized score. Unknown is
+            # not invented zero: if the host is not in the snapshot, the key is
+            # absent rather than falsified.
+            with contextlib.suppress(ValueError):
+                feature["shadow_hit_tokens"] = float(snapshot.hit_tokens(scored))
+        accepted = self._handshake.accepted if self._handshake else False
+        degraded = (
+            tuple(cap.value for cap in self._handshake.degraded)
+            if self._handshake
+            else ()
+        )
+        record = DecisionRecord(
+            DECISION_SCHEMA_VERSION,
+            self.logical_request_id,
+            self._attempt,
+            self.config.owner,
+            self.config.mode,
+            online,
+            scored,
+            feature,
+            snapshot.epoch,
+            snapshot.age_ms,
+            reason is FailOpenReason.STALE_VIEW,
+            accepted,
+            degraded,
+            reason,
+            0.0,
+            False,
+        )
+        # Non-interference: an observer or sink exception must never break
+        # routing. The failure is counted so it is visible, but the selection
+        # the caller already made stands.
+        try:
+            self._observer.observe(record)
+        except Exception:  # noqa: BLE001 - counted, not propagated
+            self._counters["observer_error_total"] += 1
 
     # -- prefill ---------------------------------------------------------
 
