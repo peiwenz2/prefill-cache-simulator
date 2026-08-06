@@ -985,13 +985,16 @@ M12.0 结果：trace 只有 1,180 个 timestamp buckets，正间隔为 3,049～3
 
 #### M12.1｜Metric contract／service regimes
 
-- [ ] 冻结 offered load、request goodput、useful-token goodput、raw token throughput、waste、SLO attainment、fairness、KVS bytes／sender queue、normalized utilization 定义。
-- [ ] strict useful-token goodput：只计 SLO 内完成的 logical request；retry 只计一次；分母包含 wasted GPU work。
-- [ ] cache reuse 只在 `uncached_tokens × c_P` 中计一次，禁止额外 hit bonus double count。
-- [ ] 在 M9-HW 前建立 compute-bound／memory-bound／mixed 三套显式 `SYNTHETIC_SERVICE_REGIME`；结论必须跨 regime 报 sensitivity。
-- [ ] 冻结最低 fairness tier 的 SLO attainment／goodput floor；M12.3 不得在结果出来后调低 floor。
+- [x] 冻结 offered load、request goodput、useful-token goodput、raw token throughput、waste、SLO attainment、fairness、KVS bytes、normalized utilization 定义；sender queue 留给 M12.2 placement event loop。
+- [x] strict useful-token goodput：只计 SLO 内完成的 logical request；retry 只计一次 useful tokens，但所有 attempt work 进分母。
+- [x] 同时冻结 `strict_useful_tokens_per_gpu_work`；只有 offered load／SLO／fairness gate 通过后才参与 Pareto，不能靠少接请求美化效率。
+- [x] cache reuse 只在 `uncached_tokens × c_P` 中计一次，禁止额外 hit bonus double count。
+- [x] 在 M9-HW 前建立 compute-bound／memory-bound／mixed 三套显式 `SYNTHETIC_SERVICE_REGIME`；结论必须跨 regime 报 sensitivity。
+- [x] fairness floor：每个出现的 tier attainment≥0.80、Jain≥0.90、相对 baseline 单 tier 退化≤0.02 absolute。
 
 Gate G12-1：metric conservation、attempt 去重、offered-load 固定和 truth-basis 测试全部通过；否则不进入策略横比。
+
+M12.1 结果：`m12-metric-contract-v1` 已冻结；三套 regime 共 18 个 service-grid cells，contract fixture 在相同 offered load／horizon 下验证 retry amplification=`1.3333`、每个 logical request 只计一次、所有 attempt GPU work 全计费。三套 fixture 的 strict useful-token goodput 均为 `12.48`（同一完成集合，证明分子不随 cost model 漂移），但 GPU efficiency／P-D utilization／waste fraction 随 regime 改变，说明资源解释维度已解耦。所有值是 contract fixture，不是策略收益。artifact：`results/m12-metrics/`；正式合同：`docs/m12-metric-contract-v1.md`。
 
 #### M12.2｜Priced Spill／Reuse-Adjusted Binpack
 

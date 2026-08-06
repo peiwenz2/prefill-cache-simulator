@@ -288,7 +288,8 @@ S3 的 54.01% 距无限单池 token ceiling 57.07% 约 3.06 pp，但有限多节
 | defer | B1 Tier fidelity | 仅保留最小模型 | 四层精细建模是否会改变决策 | M9-HW 前不增加“更精细的假参数”；只保留 conservation 与 B0 必需子集 |
 | freeze | D2 gate | upper-bound only | preemption 是否真的增加 completed goodput | Q5／Q6 与真实 resume 前不投入实现 |
 | 线 C 并行 | M12.0 reuse-time analyzer | `KILL_ROUTER_HOLD` | 3.05s bucket；5s 保守上界仅 0.1725%，低于 10% 约 58× | 停止 router hold；保留 placement locality／engine batching |
-| M12.1–M12.5 | Goodput × Reuse | 已设计，未执行 | Priced Spill、Decode Credits、cluster eviction 是否改善 strict goodput | 多维 Pareto；不得只靠 hit 或降低 offered load |
+| M12.1 | Metric contract | ✅ 完成 | goodput／efficiency／waste／fairness 不混口径 | logical 去重＋work conservation＋三套 regime |
+| M12.2–M12.5 | Goodput × Reuse | 已设计，未执行 | Priced Spill、Decode Credits、cluster eviction 是否改善 strict goodput | 多维 Pareto；不得只靠 hit 或降低 offered load |
 
 ### 5.1 Kill／narrow criteria
 

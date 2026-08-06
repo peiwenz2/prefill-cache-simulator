@@ -240,7 +240,7 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
         <tr><td>M9</td><td>标定 harness：拟合器 + 溯源门禁</td><td>MockEngine 已知真值回收</td><td><span class="tag syn">SYNTHETIC_REPLAY</span>，SYNTHETIC_UNCALIBRATED</td></tr>
         <tr><td>M10</td><td>回放验证 harness：三源对账 + 影子 + 故障注入</td><td>控制实验 3 注入 = 3 回收</td><td><span class="tag syn">SYNTHETIC_REPLAY</span>，硬件 BLOCKED</td></tr>
         <tr><td>M11</td><td>生产 RFC + 链路 mock 七场景</td><td>协议不变量断言，非 E2E</td><td><span class="tag harness">HARNESS_ONLY / RFC</span></td></tr>
-        <tr><td>M12</td><td>Goodput × Reuse 多维策略线</td><td>M12.0 已 hard-kill router hold；其余待执行</td><td><span class="tag syn">TRACE_TIMESTAMP</span>＋DESIGN_ONLY</td></tr>
+        <tr><td>M12</td><td>Goodput × Reuse 多维策略线</td><td>M12.0 router hold killed；M12.1 contract complete</td><td><span class="tag syn">TRACE_TIMESTAMP</span>＋SYNTHETIC_SERVICE_REGIME</td></tr>
       </tbody>
     </table>
 
@@ -268,6 +268,7 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
     </table>
 
     <div class="card bad"><h4>M12.0 实测 verdict：KILL_ROUTER_HOLD</h4><ul class="plain"><li>trace 只有 1,180 个约 3.05s timestamp buckets，不能直接解析 250ms。</li><li>raw token-weighted same-bucket：<strong>52.1712%</strong>；gate 口径 same-bucket：<strong>0.1186%</strong>。</li><li>用 5s window 覆盖跨 bucket 的真实 250ms pair，保守上界仍只有 <strong>0.1725%</strong>，低于 10% 约 58×。</li><li>停止 router hold-and-batch；保留 Priced Spill、placement locality 与 engine continuous batching。</li></ul></div>
+    <div class="card accent"><h4>M12.1 metric contract 已冻结</h4><ul class="plain"><li>排名：<strong>strict useful-token goodput</strong>／固定 observation horizon。</li><li>效率：useful tokens／全部 attempt GPU work；retry useful tokens 只计一次。</li><li>Fairness：tier≥0.80、Jain≥0.90、相对 baseline 退化≤0.02。</li><li>三套 regime 共 18 cells；只作 sensitivity，不是硬件性能。</li></ul></div>
     <p class="smallnote">trace：23,608 请求，input 均值 8,589.96，output 均值 182.13。Mooncake Inf=0.51 仅作论文参照（分母与插入时机未指明）。</p>
 
     <h3>3.2 Selector 对比（M4，<code>results/m4/summary.json</code>）</h3>
@@ -464,7 +465,7 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
       <thead><tr><th>Milestone</th><th>实现</th><th>多维验收</th><th>Kill／narrow</th></tr></thead>
       <tbody>
         <tr><td>M12.0</td><td>reuse-time／co-arrival CDF</td><td>四种口径 × 八档窗口；TRACE_TIMESTAMP</td><td><strong>KILL</strong>：gate 口径 0.1186%＜10%</td></tr>
-        <tr><td>M12.1</td><td>metric contract＋三种 service regimes</td><td>goodput／waste／fairness conservation</td><td>合同未通过，不做策略排名</td></tr>
+        <tr><td>M12.1</td><td>metric contract＋三种 service regimes</td><td>goodput／waste／fairness conservation</td><td><strong>COMPLETE</strong>：进入 M12.2</td></tr>
         <tr><td>M12.2</td><td>Priced Spill＋Reuse-Adjusted Binpack</td><td>hit／load／queue 三轴 Pareto</td><td>未压过 Hybrid frontier，停止 enforcement 线</td></tr>
         <tr><td>M12.3</td><td>Decode Capacity Futures</td><td>past-only causal predictor 下 overload strict goodput</td><td>1.5× 增益低于 5%，降为 overload-only</td></tr>
         <tr><td>M12.4</td><td>Replication-aware eviction</td><td>binding capacity 下 hit＋goodput</td><td>低于 0.5pp hit 且低于 2% goodput，停止</td></tr>
@@ -484,8 +485,8 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
     <ul class="plain">
       <li>设计与台账：<code>DESIGN-v3.md</code>（§0 结论、§1 证据基础、§8.3 门禁、§9 里程碑台账）</li>
       <li>生产 RFC：<code>docs/m11-production-rfc.md</code>（§2 attach、§3 所有权、§5 fail-open、§7 链路不变量、§9 R0–R4、§10 Q1–Q6、§11 状态矩阵）</li>
-      <li>合同：<code>docs/identity-contract-v1.md</code>、<code>docs/randomness-contract-v1.md</code>、<code>docs/runtime-validation-v1.md</code>、<code>docs/scenario-versioning-v1.md</code></li>
-      <li>artifact：<code>results/m4/summary.json</code>、<code>results/m5..m8/results.csv</code>、<code>results/m9-synthetic/</code>、<code>results/m10-synthetic/</code>、<code>results/m12-reuse-time/</code></li>
+      <li>合同：<code>docs/identity-contract-v1.md</code>、<code>docs/randomness-contract-v1.md</code>、<code>docs/runtime-validation-v1.md</code>、<code>docs/scenario-versioning-v1.md</code>、<code>docs/m12-metric-contract-v1.md</code></li>
+      <li>artifact：<code>results/m4/summary.json</code>、<code>results/m5..m8/results.csv</code>、<code>results/m9-synthetic/</code>、<code>results/m10-synthetic/</code>、<code>results/m12-reuse-time/</code>、<code>results/m12-metrics/</code></li>
       <li>源码：<code>src/prefill_cache_sim/</code>（selectors.py、eviction.py、kvs.py、slo.py、lifecycle.py、decode_lease.py、preemption.py、continuation.py、calibration/、replay/、chain/）</li>
       <li>Markdown 版全文：<code>docs/phase-m0-m11-explainer.md</code>（已追加 M12 todo 与 kill criteria）</li>
       <li>外部原型参照：Turbo <code>CacheAwareScheduler.java:1196-1202</code>／<code>StickySessionScheduler.java:613-670</code>；RTP-LLM <code>ShortestTTFTStrategy.java:187-205</code>（引用自 DESIGN-v3 §1）</li>

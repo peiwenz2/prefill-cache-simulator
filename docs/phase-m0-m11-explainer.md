@@ -217,13 +217,15 @@ M12 新增第三条研究线：它不等待生产 owner 签字，可以先在 CP
 | Milestone | 做什么 | 主验收 | Kill／narrow |
 |---|---|---|---|
 | M12.0 | 统计 block reuse 的时间间隔与 co-arrival CDF | 四种口径、八档窗口、provenance 完整 | token-weighted＋causal-hot-excluded raw 250ms＜10%，hard kill；通过只进入 miss-convertible 分解 |
-| M12.1 | 冻结 strict goodput／waste／fairness／utilization 合同 | conservation＋logical request 去重 | 合同未通过，不做策略排名 |
+| M12.1 | 冻结 strict goodput／waste／fairness／utilization 合同 | `m12-metric-contract-v1`；9 个定向测试 | ✅ 完成；三套 regime 只作 sensitivity |
 | M12.2 | Priced Spill＋Reuse-Adjusted Binpack | hit／load／queue 三轴 Pareto | 未压过 Hybrid frontier，停止 enforcement 线 |
 | M12.3 | Decode credits＋lease repricing | 1.5× overload noisy predictor strict goodput | 增益低于 5%，降为 overload-only |
 | M12.4 | Replication-aware eviction | binding capacity 下 hit＋goodput | 小于 0.5pp hit 且小于 2% goodput，停止 |
 | M12.5 | 0.8×～2.0× overload 多维验收 | goodput 主表＋SLO／fairness 约束＋资源解释 | 失败格子必须完整展示 |
 
 M12.0 已执行：trace 只有 1,180 个约 3.05s timestamp buckets，不能直接解析 250ms。raw token-weighted same-bucket 为 `52.1712%`，但 gate 口径 same-bucket 只有 `0.1186%`；再用 5s window 覆盖可能跨 bucket 的真实 250ms pair，保守上界仍只有 `0.1725%`，比 10% gate 低约 58×。结论是 `KILL_ROUTER_HOLD`；不再为 router hold 增加 miss-convertible synthetic 模型，继续 M12.1 metric contract 与 M12.2 Priced Spill。
+
+M12.1 已执行：strict useful-token goodput 按固定 horizon 排名；一个 logical request 最多计一次 useful tokens，所有 retry／abort attempt work 全进资源分母。fairness 冻结为 tier attainment≥0.80、Jain≥0.90、相对 baseline 单 tier 退化≤0.02。COMPUTE_BOUND／MEMORY_BOUND／MIXED 只用于排序 sensitivity，禁止解释为真实硬件。
 
 核心决策式只有一份：
 
