@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
+
+HIT_RATE_EPSILON_ABSOLUTE = 0.001
+LOAD_SKEW_EPSILON_ABSOLUTE = 0.05
+P_QUEUE_P95_EPSILON_RELATIVE = 0.05
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +119,136 @@ class PricedSpillSelector:
             kvs_transfer_work=transfer,
             total_marginal_work=total,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class PlacementStrategyMetrics:
+    strategy_id: str
+    token_hit_rate: float
+    request_load_max_mean: float
+    p_queue_p95: float
+    strict_useful_token_goodput: float
+    strict_useful_output_token_goodput: float
+    minimum_tier_slo_attainment: float
+    jain_fairness: float
+    per_tier_slo_attainment: Mapping[str, float]
+
+    def __post_init__(self) -> None:
+        tiers = dict(self.per_tier_slo_attainment)
+        object.__setattr__(self, "per_tier_slo_attainment", MappingProxyType(tiers))
+        values = (
+            self.token_hit_rate,
+            self.request_load_max_mean,
+            self.p_queue_p95,
+            self.strict_useful_token_goodput,
+            self.strict_useful_output_token_goodput,
+            self.minimum_tier_slo_attainment,
+            self.jain_fairness,
+        )
+        if not self.strategy_id or any(
+            value < 0 or not math.isfinite(value) for value in values
+        ):
+            raise ValueError("strategy metrics must be named, finite and non-negative")
+        if any(
+            value > 1
+            for value in (
+                self.token_hit_rate,
+                self.minimum_tier_slo_attainment,
+                self.jain_fairness,
+            )
+        ):
+            raise ValueError("ratio metrics must be in [0, 1]")
+        if not tiers or any(
+            not tier or value < 0 or value > 1 or not math.isfinite(value)
+            for tier, value in tiers.items()
+        ):
+            raise ValueError("per-tier attainment must be a non-empty ratio mapping")
+        if self.minimum_tier_slo_attainment != min(tiers.values()):
+            raise ValueError("minimum tier attainment must match the per-tier mapping")
+
+
+@dataclass(frozen=True, slots=True)
+class G12TwoVerdict:
+    verdict: str
+    strictly_improved_axes: tuple[str, ...]
+    violated_axes: tuple[str, ...]
+
+
+def evaluate_g12_2(
+    baseline: PlacementStrategyMetrics,
+    candidate: PlacementStrategyMetrics,
+) -> G12TwoVerdict:
+    """Apply the frozen G12-2 Pareto gate without display-value rounding."""
+    if (
+        baseline.strategy_id != "HYBRID"
+        or candidate.strategy_id == baseline.strategy_id
+    ):
+        raise ValueError("G12-2 requires HYBRID baseline and a distinct candidate")
+    if set(candidate.per_tier_slo_attainment) != set(baseline.per_tier_slo_attainment):
+        raise ValueError("G12-2 requires the same frozen tier set")
+    improved = tuple(
+        name
+        for name, better in (
+            ("token_hit_rate", candidate.token_hit_rate > baseline.token_hit_rate),
+            (
+                "request_load_max_mean",
+                candidate.request_load_max_mean < baseline.request_load_max_mean,
+            ),
+            ("p_queue_p95", candidate.p_queue_p95 < baseline.p_queue_p95),
+        )
+        if better
+    )
+    violated = tuple(
+        name
+        for name, violation in (
+            (
+                "token_hit_rate",
+                candidate.token_hit_rate
+                < baseline.token_hit_rate - HIT_RATE_EPSILON_ABSOLUTE,
+            ),
+            (
+                "request_load_max_mean",
+                candidate.request_load_max_mean
+                > baseline.request_load_max_mean + LOAD_SKEW_EPSILON_ABSOLUTE,
+            ),
+            (
+                "p_queue_p95",
+                candidate.p_queue_p95
+                > baseline.p_queue_p95 * (1 + P_QUEUE_P95_EPSILON_RELATIVE),
+            ),
+            (
+                "strict_useful_token_goodput",
+                candidate.strict_useful_token_goodput
+                < baseline.strict_useful_token_goodput,
+            ),
+            (
+                "strict_useful_output_token_goodput",
+                candidate.strict_useful_output_token_goodput
+                < baseline.strict_useful_output_token_goodput * 0.999,
+            ),
+            (
+                "minimum_tier_slo_attainment",
+                candidate.minimum_tier_slo_attainment < 0.80,
+            ),
+            ("jain_fairness", candidate.jain_fairness < 0.90),
+            (
+                "relative_tier_slo_attainment",
+                any(
+                    candidate.per_tier_slo_attainment[tier]
+                    < baseline.per_tier_slo_attainment[tier] - 0.02
+                    for tier in baseline.per_tier_slo_attainment
+                ),
+            ),
+        )
+        if violation
+    )
+    return G12TwoVerdict(
+        "PASS_PROVISIONAL"
+        if len(improved) >= 2 and not violated
+        else "KILL_ENFORCEMENT",
+        improved,
+        violated,
+    )
 
 
 def _stable_index(key: str, size: int) -> int:
