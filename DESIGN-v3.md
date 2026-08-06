@@ -967,6 +967,69 @@ Production 部分（本次不做，保持未完成）：
 
 M11 结论：RFC 已就三件事拍板——selector 接入点、lifecycle 归属、上线形态；chain mock 把 RFC §7 的不变量做成可执行断言，覆盖 fail-open（五类 reason 全部计数、required 模式先计数后硬失败）、stale／epoch 回退 view 降级、rollback 不产生用户可见 output、lease expiry 不消耗 retry budget 且在边界推进 epoch fence（`max_rounds` 耗尽也先 fence 再拒绝，过期 leg 不能继续投递）、decode leg 只持 leg-local seq 而去重只在 fence（superseded-leg race 有测试，sibling admission 被拒绝，每个 leg attempt identity 唯一且 owner-mediated）、`report_checkpoint` 绑定 reporting leg（absent／superseded／sibling report 拒绝，checkpoint 携带 leg-local epoch＋seq）、cache-aware 打分依赖握手协商到 `PREFIX_CACHE_QUERY`（否则 hit 项按 0 计、退回 baseline 且不发布 score）、crash 恢复只读 durable output-ack（无 ack 则 fail closed）、controller epoch 视图落后时 D2 fail-open 而非抛异常。**这是跨组件协议／状态机测试，不是 production E2E**；全部数值标记 `TruthBasis.SYNTHETIC_FIXTURE`，不可作为测量值发布。D2 在 mock 中保持 gated：闸关闭或 `COOPERATIVE_PREEMPT` 未协商时只可能产出 `REPORT_CHECKPOINT`，`hard_abort()` 无条件抛异常。未覆盖项如实列在 RFC §11：attempt 边界模式切换未测试，Turbo pull 派发循环未建模，durable ack 介质与 D2 re-registration 是 open question。production MR、硬件验证、canary 均未开始。
 
+### M12｜Goodput × Reuse：从 request selector 到 cluster work scheduler
+
+M12 不再以“多拿 cache hit”为主目标。cache hit 只通过减少 `uncached_tokens` 降低一次 Prefill cost；主排名指标升级为 **strict useful-token goodput**，并同时报告 SLO、waste、load skew、fairness、KVS pressure 与 normalized utilization。M9-HW 前禁止把 normalized utilization 写成 MFU。
+
+#### M12.0｜Reuse-time／co-arrival analyzer
+
+- [x] 对每次 block re-reference 计算与上次引用的 `delta_t`；输出 10ms／50ms／100ms／250ms／1s／5s／1min／5min 全窗口 CDF。
+- [x] 分开统计 block-reference、token-weighted、prefix-family root、hot-block excluded 四种口径。`hot-block excluded` 冻结为 S4 的 causal 规则：只看历史计数、每 256 requests 刷新历史频率 p99、阈值不低于 8；不得用 full-trace hotness 回填过去。
+- [x] 输出可复现 CSV／JSON／SVG，并固定 trace SHA、config SHA、git provenance。
+- [x] analyzer 单 pass、只持有 `last_seen` 与过去计数；同 timestamp tie 保守算进 raw upper bound，不读取 next access。
+- [ ] baseline already-hit、inflight-overlap 与 miss-convertible work 原计划在 M12.1 三套 regime 下分账；G12-0a 已 hard kill router hold，因此该 build-side 分解标 `NOT_APPLICABLE_AFTER_HARD_KILL`，不为被终止方案继续增加 synthetic 模型。
+
+Gate G12-0a（hardware-independent hard kill）：唯一判据冻结为 **250ms 内 token-weighted＋causal-hot-excluded raw co-arrival＜10%**。raw co-arrival 是 hold 可转换工作的宽松上界；低于 10% 直接停止 router hold-and-batch，保留 engine continuous batching＋placement locality。大于等于 10% 只表示进入 M12.1 做 miss-convertible／inflight 分解，**不等于允许实现 hold**。未来若通过 build gate，最多 250ms 的 hold latency 必须计入 M12.5 strict goodput／SLO。
+
+M12.0 结果：trace 只有 1,180 个 timestamp buckets，正间隔为 3,049～3,057ms；因此 10ms～1s 的相同数值只表示 same-bucket，不能声称 trace 解析了 250ms。raw block-reference same-bucket=`52.1371%`、raw token-weighted=`52.1712%`；预注册 gate 口径 same-bucket=`0.1186%`。为覆盖可能跨 bucket boundary 的真实 250ms pair，使用 5s window 作严格保守上界，仍只有 **`0.1725%`**，比 10% gate 低约 58×。因此 G12-0a=`KILL_ROUTER_HOLD`，停止 router hold-and-batch；这不否定 Priced Spill、placement locality 或 engine continuous batching。causal p99 threshold 在本 trace 92 次 refresh 中始终停在 floor=8；16／32／64／128 sensitivity 仍均低于 10%，结论不依赖单点阈值。artifact：`results/m12-reuse-time/`，truth basis=`TRACE_TIMESTAMP`。
+
+#### M12.1｜Metric contract／service regimes
+
+- [ ] 冻结 offered load、request goodput、useful-token goodput、raw token throughput、waste、SLO attainment、fairness、KVS bytes／sender queue、normalized utilization 定义。
+- [ ] strict useful-token goodput：只计 SLO 内完成的 logical request；retry 只计一次；分母包含 wasted GPU work。
+- [ ] cache reuse 只在 `uncached_tokens × c_P` 中计一次，禁止额外 hit bonus double count。
+- [ ] 在 M9-HW 前建立 compute-bound／memory-bound／mixed 三套显式 `SYNTHETIC_SERVICE_REGIME`；结论必须跨 regime 报 sensitivity。
+- [ ] 冻结最低 fairness tier 的 SLO attainment／goodput floor；M12.3 不得在结果出来后调低 floor。
+
+Gate G12-1：metric conservation、attempt 去重、offered-load 固定和 truth-basis 测试全部通过；否则不进入策略横比。
+
+#### M12.2｜Priced Spill／Reuse-Adjusted Binpack
+
+- [ ] 给 prefix family 建 causal home；home 只作 locality anchor，不作硬 sticky。
+- [ ] 实现分阶段统一边际成本。M12.2 只启用 `uncached prefill + P-side queue wait + KVS transfer`，并固定 `eviction_regret=0`、`decode_debt=0`；M12.3／M12.4 分别启用新项，并各自相对 M12.2 做 ablation。
+- [ ] binpack 使用 `effective_prefill_work`，而不是原始 input length；model／adapter、work shape、SLO slack、KVS contention 作为 cohort constraints。
+- [ ] 所有 price 来自 frozen synthetic regime 或 M9-HW calibration；未标定时不宣称 wall-clock。
+- [ ] 与 S3、S4、S5、S6、Mooncake Algorithm 1 做 hit／goodput／queue p95／max-mean Pareto 对比。
+
+Gate G12-2：相对 Hybrid，hit epsilon 冻结为 `0.1pp`、max／mean epsilon 为 `+0.05 absolute`、P queue p95 epsilon 为 `+5% relative`。Priced Spill 必须至少严格改善两轴，且第三轴不超过对应退化 epsilon；否则停止 enforcement 设计，仅保留 offline accounting。
+
+#### M12.3｜Decode Capacity Futures／admission
+
+- [ ] 在 deterministic event heap 中加入共享 D capacity、decode residency 和 P→D debt ledger。
+- [ ] admission 预留 `predicted_output_tokens × c_D` credits；拥塞时 defer／gated-PD／gated-DP，不因 cache hit 高而无条件放行。
+- [ ] 同时跑 `ORACLE`、`ORACLE_NOISED` 与 causal predictor。`ORACLE_NOISED=true_output×noise` 仍偷看 label，只作 sensitivity；causal predictor 只允许 admission-time features（input length、past-only prefix-family output history），按 timestamp temporal split 训练／评估。deployable 结论只看 causal variant。
+- [ ] D1／D1.5 lease 在 boundary repricing；abort 只在 continuation value 为负且满足既有 OutputAuthority／retry-budget fence 时允许。
+
+Gate G12-3：1.5× overload 下 noisy predictor 相对 no-gate strict goodput 增益至少 5%，且没有靠降低 offered load 或破坏最低 fairness tier 获得；否则降为 overload protection，不作常态策略。
+
+#### M12.4｜Replication-aware eviction
+
+- [ ] 定义 bounded／stale cluster cache census，不在 hot path 建强一致 global map。
+- [ ] eviction regret = causal reuse estimate × recompute cost − cheapest replica／tier recovery cost。
+- [ ] spills 创建 replica 后更新 eviction value；sender congestion、census staleness、unique-hot protection 做 sensitivity。
+
+Gate G12-4：只在 capacity binding（LRU 距 ceiling 至少 3pp）场景验收；相对 LRU 若 hit 小于 0.5pp 且 strict goodput 小于 2%，停止该策略。
+
+#### M12.5｜Overload sweep／最终多维验收
+
+- [ ] arrival scale `0.8×～2.0×` × 三套 service regimes × baseline／Priced Spill／+Decode Credits／+Census Eviction。
+- [ ] 主表：strict useful-token goodput；约束表：p99 TTFT／TPOT proxy、fairness；解释表：hit、waste、load skew、KVS pressure、normalized utilization。
+- [ ] 输出 Pareto frontier、策略 crossover、失败格子和 kill／narrow verdict；不得只展示最好配置。
+- [ ] M9-HW 完成后用真实曲线重跑 M12-HW；只有此时才能报告 MFU 和 wall-clock SLO。
+- [ ] 更新 `docs/strategy-value-audit.{md,html}` 和阶段说明 HTML；render 复核、OSS／MindForge 登记、GitHub sync。
+
+M12 总门 G12：策略按 strict useful-token goodput 排名，cache hit 与 MFU 只作解释；任何策略若只提高 hit、但 strict goodput／SLO／fairness 未形成 Pareto 改善，不进入 production shadow。**Normalized simulation 的 kill verdict 可以终止方案；pass verdict 只表示 provisional，必须经 M12-HW 才能升级。**
+
 ---
 
 ## 10. Fable review resolution

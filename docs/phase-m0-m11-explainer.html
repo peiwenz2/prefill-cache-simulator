@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>prefill-cache-sim：M0–M11 阶段说明书</title>
+<title>prefill-cache-sim：M0–M12 阶段说明书</title>
 <style>
 :root{
   --ink:#171a21; --bg:#f6f7f9; --accent:#4338ca; --accent-bg:#eef0fe;
@@ -90,12 +90,12 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
   <div class="hero-inner">
     <div class="pills">
       <span class="pill p1">阶段总结</span>
-      <span class="pill p2">M0–M11 已完成（仿真域）</span>
-      <span class="pill p3">HEAD cfb643c</span>
+      <span class="pill p2">M0–M11 已完成／M12 已规划</span>
+      <span class="pill p3">基线 c6f8376</span>
       <span class="pill p3">作者: 张珮文</span>
     </div>
-    <h1>prefill-cache-sim：M0–M11 阶段说明书</h1>
-    <p class="lead">这个仓库是一个策略决策实验室：在同一条 23,608 请求的生产形态 trace 上，对比 prefill 节点选择、缓存淘汰、共享 KVS、decode 租约与协作抢占的相对排序。全部时间量纲是 NORMALIZED_WORK，不是硬件毫秒；本阶段产出的是"比大小"的证据链与生产 RFC，不是上线许可。</p>
+    <h1>prefill-cache-sim：M0–M12 阶段说明书</h1>
+    <p class="lead">这个仓库是一个策略决策实验室：M0–M11 完成节点选择、淘汰、KVS、SLO 与 lifecycle 的仿真闭环；M12 转向 Goodput × Reuse，把 Priced Spill、Reuse-Adjusted Binpack、Decode Credits 与 cluster eviction 放进同一套多维验收。M9-HW 前只报告 NORMALIZED_WORK／normalized utilization，不报告真实毫秒或 MFU。</p>
   </div>
 </header>
 
@@ -227,7 +227,7 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
       </tbody>
     </table>
 
-    <h3>2.4 M0–M11 里程碑分类账</h3>
+    <h3>2.4 M0–M12 里程碑分类账</h3>
     <table>
       <thead><tr><th>里程碑</th><th>建了什么</th><th>验收方式</th><th>证据强度</th></tr></thead>
       <tbody>
@@ -240,6 +240,7 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
         <tr><td>M9</td><td>标定 harness：拟合器 + 溯源门禁</td><td>MockEngine 已知真值回收</td><td><span class="tag syn">SYNTHETIC_REPLAY</span>，SYNTHETIC_UNCALIBRATED</td></tr>
         <tr><td>M10</td><td>回放验证 harness：三源对账 + 影子 + 故障注入</td><td>控制实验 3 注入 = 3 回收</td><td><span class="tag syn">SYNTHETIC_REPLAY</span>，硬件 BLOCKED</td></tr>
         <tr><td>M11</td><td>生产 RFC + 链路 mock 七场景</td><td>协议不变量断言，非 E2E</td><td><span class="tag harness">HARNESS_ONLY / RFC</span></td></tr>
+        <tr><td>M12</td><td>Goodput × Reuse 多维策略线</td><td>M12.0 已 hard-kill router hold；其余待执行</td><td><span class="tag syn">TRACE_TIMESTAMP</span>＋DESIGN_ONLY</td></tr>
       </tbody>
     </table>
 
@@ -265,6 +266,8 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
         <tr><td>token-weighted 上限</td><td>57.0700233%</td><td><code>115733271 / 202791701</code></td></tr>
       </tbody>
     </table>
+
+    <div class="card bad"><h4>M12.0 实测 verdict：KILL_ROUTER_HOLD</h4><ul class="plain"><li>trace 只有 1,180 个约 3.05s timestamp buckets，不能直接解析 250ms。</li><li>raw token-weighted same-bucket：<strong>52.1712%</strong>；gate 口径 same-bucket：<strong>0.1186%</strong>。</li><li>用 5s window 覆盖跨 bucket 的真实 250ms pair，保守上界仍只有 <strong>0.1725%</strong>，低于 10% 约 58×。</li><li>停止 router hold-and-batch；保留 Priced Spill、placement locality 与 engine continuous batching。</li></ul></div>
     <p class="smallnote">trace：23,608 请求，input 均值 8,589.96，output 均值 182.13。Mooncake Inf=0.51 仅作论文参照（分母与插入时机未指明）。</p>
 
     <h3>3.2 Selector 对比（M4，<code>results/m4/summary.json</code>）</h3>
@@ -378,7 +381,7 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
     <figure>
       <svg viewBox="0 0 860 300">
         <defs>
-          <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
             <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
           </marker>
         </defs>
@@ -438,6 +441,41 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
     <pre><code>.venv/bin/python scripts/run_m9_synthetic.py    # 标定 harness（MockEngine）
 .venv/bin/python scripts/run_m10_synthetic.py   # 回放验证 harness（1×/2×）</code></pre>
     <p class="smallnote">硬件版需先把 endpoint 换成携带真实 <code>MachineProvenance</code> 的 <code>EngineEndpoint</code>；当前仓库中不存在该实现，属 M9-HW 工作项。</p>
+
+    <h3>5.3 线 C：M12 Goodput × Reuse</h3>
+    <div class="card accent">
+      <h4>目标函数变了</h4>
+      <ul class="plain">
+        <li><strong>主排名：</strong>strict useful-token goodput。</li>
+        <li><strong>硬约束：</strong>SLO、fairness、offered load 不变。</li>
+        <li><strong>解释指标：</strong>cache hit、waste、load skew、KVS pressure、normalized utilization。</li>
+        <li><strong>反作弊：</strong>cache hit 只通过减少 uncached tokens 计价一次。</li>
+      </ul>
+    </div>
+
+    <pre><code>MarginalCost(node)
+  = uncached_tokens × prefill_cost
+  + P-side queue_wait
+  + KVS_transfer
+  + eviction_regret  # M12.4 才启用
+  + decode_debt      # M12.3 才启用</code></pre>
+
+    <table>
+      <thead><tr><th>Milestone</th><th>实现</th><th>多维验收</th><th>Kill／narrow</th></tr></thead>
+      <tbody>
+        <tr><td>M12.0</td><td>reuse-time／co-arrival CDF</td><td>四种口径 × 八档窗口；TRACE_TIMESTAMP</td><td><strong>KILL</strong>：gate 口径 0.1186%＜10%</td></tr>
+        <tr><td>M12.1</td><td>metric contract＋三种 service regimes</td><td>goodput／waste／fairness conservation</td><td>合同未通过，不做策略排名</td></tr>
+        <tr><td>M12.2</td><td>Priced Spill＋Reuse-Adjusted Binpack</td><td>hit／load／queue 三轴 Pareto</td><td>未压过 Hybrid frontier，停止 enforcement 线</td></tr>
+        <tr><td>M12.3</td><td>Decode Capacity Futures</td><td>past-only causal predictor 下 overload strict goodput</td><td>1.5× 增益低于 5%，降为 overload-only</td></tr>
+        <tr><td>M12.4</td><td>Replication-aware eviction</td><td>binding capacity 下 hit＋goodput</td><td>低于 0.5pp hit 且低于 2% goodput，停止</td></tr>
+        <tr><td>M12.5</td><td>0.8×～2.0× overload sweep</td><td>goodput 主表＋SLO／fairness 约束＋资源解释</td><td>必须展示失败格子，不只展示最好配置</td></tr>
+        <tr><td>M12-HW</td><td>替换为 M9-HW service curves</td><td>真实 wall-clock SLO／MFU</td><td>硬件前禁止发布 MFU claim</td></tr>
+      </tbody>
+    </table>
+
+    <div class="card warn"><h4>分阶段计价</h4><ul class="plain"><li>M12.2 固定 <code>eviction_regret=0</code>、<code>decode_debt=0</code>。</li><li>M12.3／M12.4 每启用一项，都相对 M12.2 做 ablation。</li><li>normalized simulation 可以 kill；pass 只算 provisional，必须等 M12-HW。</li></ul></div>
+
+    <div class="card warn"><h4>里程碑 review 纪律</h4><p>M12 方向 gate 与每个 milestone 完成时只请 Fable 验收。每次验收必须检查 artifact、测试、kill criteria 和 truth basis；不再用 Opus 5 重复 double-check。</p></div>
   </section>
 
   <!-- ============ 6. 引用 ============ -->
@@ -447,9 +485,9 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
       <li>设计与台账：<code>DESIGN-v3.md</code>（§0 结论、§1 证据基础、§8.3 门禁、§9 里程碑台账）</li>
       <li>生产 RFC：<code>docs/m11-production-rfc.md</code>（§2 attach、§3 所有权、§5 fail-open、§7 链路不变量、§9 R0–R4、§10 Q1–Q6、§11 状态矩阵）</li>
       <li>合同：<code>docs/identity-contract-v1.md</code>、<code>docs/randomness-contract-v1.md</code>、<code>docs/runtime-validation-v1.md</code>、<code>docs/scenario-versioning-v1.md</code></li>
-      <li>artifact：<code>results/m4/summary.json</code>、<code>results/m5..m8/results.csv</code>、<code>results/m9-synthetic/</code>、<code>results/m10-synthetic/</code></li>
+      <li>artifact：<code>results/m4/summary.json</code>、<code>results/m5..m8/results.csv</code>、<code>results/m9-synthetic/</code>、<code>results/m10-synthetic/</code>、<code>results/m12-reuse-time/</code></li>
       <li>源码：<code>src/prefill_cache_sim/</code>（selectors.py、eviction.py、kvs.py、slo.py、lifecycle.py、decode_lease.py、preemption.py、continuation.py、calibration/、replay/、chain/）</li>
-      <li>Markdown 版全文：<code>docs/phase-m0-m11-explainer.md</code>（含审读清单）</li>
+      <li>Markdown 版全文：<code>docs/phase-m0-m11-explainer.md</code>（已追加 M12 todo 与 kill criteria）</li>
       <li>外部原型参照：Turbo <code>CacheAwareScheduler.java:1196-1202</code>／<code>StickySessionScheduler.java:613-670</code>；RTP-LLM <code>ShortestTTFTStrategy.java:187-205</code>（引用自 DESIGN-v3 §1）</li>
     </ul>
     <p class="smallnote">本地验证记录（非 artifact）：682 测试通过、ruff clean——仅证明代码自洽，不构成 E2E／canary 证据。</p>

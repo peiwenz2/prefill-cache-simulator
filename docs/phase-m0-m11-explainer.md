@@ -1,7 +1,7 @@
-# prefill-cache-sim：M0–M11 阶段新人向说明书
+# prefill-cache-sim：M0–M12 阶段新人向说明书
 
 - 作者：张珮文
-- 基准提交：`cfb643c`（M9=`b651bf9`，M10=`4ca340a`，M11=`cfb643c`，工作区 clean）
+- M12 规划基线：`c6f8376`（M9=`b651bf9`，M10=`4ca340a`，M11=`cfb643c`）；最终验收时更新为交付 HEAD。
 - 时间单位声明：所有仿真结果的时间量纲是 `NORMALIZED_WORK`（归一化工作量），**不是硬件毫秒**。带 `_ms` 后缀的字段同样是归一化工作量（见 `results/m6/results.csv` 的 `metric_unit` 列与 M10 的 `unit_note`）。
 
 ---
@@ -79,7 +79,7 @@ E0 FIFO、E1 LRU、E2 SLRU、E3 二次命中准入 + LRU、E4 链感知价值淘
 
 ---
 
-## 3. M0–M11 里程碑分类账
+## 3. M0–M12 里程碑分类账
 
 每行回答三件事：建了什么、怎么验收、证据强度。完整台账在 `DESIGN-v3.md` §9。
 
@@ -181,6 +181,8 @@ safety_margin 0.1→50→100→200 时 `preemptions_per_completed_request` 0.379
 
 前提铁律：**CPU 机器可以跑通 replay 与 shadow 的管线（plumbing），但产不出 GPU 硬件标定数据。**所以硬件线与生产接入线互不阻塞、并行推进。
 
+M12 新增第三条研究线：它不等待生产 owner 签字，可以先在 CPU deterministic simulator 上验证；但没有 M9-HW 时只允许报告 normalized utilization，不能称 MFU。
+
 ### 6.1 线 A：硬件标定线（M9-HW → M10-HW）
 
 | 门 | 内容 | 进入条件 | 退出条件 |
@@ -209,6 +211,34 @@ safety_margin 0.1→50→100→200 时 `preemptions_per_completed_request` 0.379
 - 四档 enforcement：off｜shadow｜enforce｜required；fail-open 五种原因计数（timeout／error／stale view／capability mismatch／planner unavailable）。
 - 能力握手：PREFIX_CACHE_QUERY、DECODE_LEASE_V1、R2_CHECKPOINT_STORE、COOPERATIVE_PREEMPT；**未握手实例按零能力对待**。
 - 链路 mock 七场景（超时／stale view／P 回滚／D 拒绝／租约到期／迟到帧／client 崩溃）是**协议不变量测试，不是生产 E2E**。
+
+### 6.4 线 C：M12 Goodput × Reuse
+
+| Milestone | 做什么 | 主验收 | Kill／narrow |
+|---|---|---|---|
+| M12.0 | 统计 block reuse 的时间间隔与 co-arrival CDF | 四种口径、八档窗口、provenance 完整 | token-weighted＋causal-hot-excluded raw 250ms＜10%，hard kill；通过只进入 miss-convertible 分解 |
+| M12.1 | 冻结 strict goodput／waste／fairness／utilization 合同 | conservation＋logical request 去重 | 合同未通过，不做策略排名 |
+| M12.2 | Priced Spill＋Reuse-Adjusted Binpack | hit／load／queue 三轴 Pareto | 未压过 Hybrid frontier，停止 enforcement 线 |
+| M12.3 | Decode credits＋lease repricing | 1.5× overload noisy predictor strict goodput | 增益低于 5%，降为 overload-only |
+| M12.4 | Replication-aware eviction | binding capacity 下 hit＋goodput | 小于 0.5pp hit 且小于 2% goodput，停止 |
+| M12.5 | 0.8×～2.0× overload 多维验收 | goodput 主表＋SLO／fairness 约束＋资源解释 | 失败格子必须完整展示 |
+
+M12.0 已执行：trace 只有 1,180 个约 3.05s timestamp buckets，不能直接解析 250ms。raw token-weighted same-bucket 为 `52.1712%`，但 gate 口径 same-bucket 只有 `0.1186%`；再用 5s window 覆盖可能跨 bucket 的真实 250ms pair，保守上界仍只有 `0.1725%`，比 10% gate 低约 58×。结论是 `KILL_ROUTER_HOLD`；不再为 router hold 增加 miss-convertible synthetic 模型，继续 M12.1 metric contract 与 M12.2 Priced Spill。
+
+核心决策式只有一份：
+
+```text
+MarginalCost(node)
+  = uncached_tokens × prefill_cost
+  + P-side queue_wait
+  + KVS_transfer
+  + eviction_regret  # M12.4 才启用
+  + decode_debt      # M12.3 才启用
+```
+
+cache hit 只通过减少 `uncached_tokens` 计价一次。最终排名看 strict useful-token goodput；hit、normalized utilization 和未来的 MFU 都只是解释指标。
+
+M12.2 先固定 `eviction_regret=0`、`decode_debt=0`；M12.3／M12.4 每启用一项都要相对 M12.2 做 ablation。normalized simulation 可以作最终 kill，但 pass 只算 provisional，必须等 M12-HW。
 
 ---
 
