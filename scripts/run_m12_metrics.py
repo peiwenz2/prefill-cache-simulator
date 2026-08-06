@@ -18,11 +18,13 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from prefill_cache_sim.config import git_provenance  # noqa: E402
 from prefill_cache_sim.m12_metrics import (  # noqa: E402
+    MAX_OUTPUT_GOODPUT_REGRESSION_RELATIVE,
     MAX_TIER_REGRESSION_ABSOLUTE,
     MINIMUM_JAIN_FAIRNESS,
     MINIMUM_TIER_SLO_ATTAINMENT,
     SERVICE_REGIMES,
     AttemptOutcome,
+    LogicalRequestSpec,
     aggregate_m12_metrics,
 )
 
@@ -78,6 +80,7 @@ def _attempts(regime_index: int) -> list[AttemptOutcome]:
                     p_work,
                     d_work / 8,
                     32_768,
+                    regime.kvs_work(32_768),
                 )
             )
         attempts.append(
@@ -103,6 +106,19 @@ def _attempts(regime_index: int) -> list[AttemptOutcome]:
     return attempts
 
 
+def _workload() -> list[LogicalRequestSpec]:
+    return [
+        LogicalRequestSpec(f"logical-{index}", tenant, tier, 0, 4096, 64)
+        for index, (tenant, tier) in enumerate(
+            zip(
+                ("tenant-a", "tenant-b", "tenant-c"),
+                ("STRICT", "STANDARD", "RELAXED"),
+                strict=True,
+            )
+        )
+    ]
+
+
 def main() -> int:
     provenance = git_provenance(ROOT)
     grid_rows: list[dict[str, object]] = []
@@ -120,9 +136,7 @@ def main() -> int:
                 }
             )
         for concurrency in (1, 16, 64):
-            unit_work = regime.decode_work(
-                64, concurrent_sequences=concurrency
-            )
+            unit_work = regime.decode_work(64, concurrent_sequences=concurrency)
             grid_rows.append(
                 {
                     "regime": regime.regime_id.value,
@@ -133,6 +147,7 @@ def main() -> int:
                 }
             )
         validation[regime.regime_id.value] = aggregate_m12_metrics(
+            _workload(),
             _attempts(regime_index),
             observation_start_work=0,
             observation_end_work=1000,
@@ -141,7 +156,7 @@ def main() -> int:
         ).to_dict()
 
     contract = {
-        "schema_version": "m12-metric-contract-v1",
+        "schema_version": "m12-metric-contract-v1.1",
         "truth_basis": "SYNTHETIC_SERVICE_REGIME",
         "primary_metric": "strict_useful_token_goodput",
         "efficiency_metric": "strict_useful_tokens_per_gpu_work",
@@ -149,6 +164,9 @@ def main() -> int:
             "minimum_tier_slo_attainment": MINIMUM_TIER_SLO_ATTAINMENT,
             "minimum_jain_fairness": MINIMUM_JAIN_FAIRNESS,
             "max_tier_regression_absolute": MAX_TIER_REGRESSION_ABSOLUTE,
+            "max_output_goodput_regression_relative": (
+                MAX_OUTPUT_GOODPUT_REGRESSION_RELATIVE
+            ),
         },
         "regimes": [asdict(regime) for regime in SERVICE_REGIMES],
         "claims": {
@@ -169,7 +187,7 @@ def main() -> int:
     }
     artifacts["MANIFEST.json"] = _json_bytes(
         {
-            "schema_version": "m12-metrics-manifest-v1",
+            "schema_version": "m12-metrics-manifest-v1.1",
             "files": {
                 name: hashlib.sha256(content).hexdigest()
                 for name, content in sorted(artifacts.items())

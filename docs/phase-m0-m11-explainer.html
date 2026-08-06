@@ -268,7 +268,7 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
     </table>
 
     <div class="card bad"><h4>M12.0 实测 verdict：KILL_ROUTER_HOLD</h4><ul class="plain"><li>trace 只有 1,180 个约 3.05s timestamp buckets，不能直接解析 250ms。</li><li>raw token-weighted same-bucket：<strong>52.1712%</strong>；gate 口径 same-bucket：<strong>0.1186%</strong>。</li><li>用 5s window 覆盖跨 bucket 的真实 250ms pair，保守上界仍只有 <strong>0.1725%</strong>，低于 10% 约 58×。</li><li>停止 router hold-and-batch；保留 Priced Spill、placement locality 与 engine continuous batching。</li></ul></div>
-    <div class="card accent"><h4>M12.1 metric contract 已冻结</h4><ul class="plain"><li>排名：<strong>strict useful-token goodput</strong>／固定 observation horizon。</li><li>效率：useful tokens／全部 attempt GPU work；retry useful tokens 只计一次。</li><li>Fairness：tier≥0.80、Jain≥0.90、相对 baseline 退化≤0.02。</li><li>三套 regime 共 18 cells；只作 sensitivity，不是硬件性能。</li></ul></div>
+    <div class="card accent"><h4>M12.1 metric contract v1.1 已冻结</h4><ul class="plain"><li>Workload truth 独立于 attempts；zero-attempt drop 仍在 offered／fairness 分母。</li><li>排名：combined strict goodput；input／output 分列，output 相对退化≤0.1%。</li><li>全部 retry／abort GPU work 计费；KVS normalized work 进入 M12.2 completion scheduling。</li><li>Fairness：tier≥0.80、Jain≥0.90、相对 baseline 退化≤0.02；三套 regime 只作 sensitivity。</li></ul></div>
     <p class="smallnote">trace：23,608 请求，input 均值 8,589.96，output 均值 182.13。Mooncake Inf=0.51 仅作论文参照（分母与插入时机未指明）。</p>
 
     <h3>3.2 Selector 对比（M4，<code>results/m4/summary.json</code>）</h3>

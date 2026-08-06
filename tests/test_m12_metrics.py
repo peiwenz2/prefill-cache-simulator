@@ -7,6 +7,7 @@ import pytest
 from prefill_cache_sim.m12_metrics import (
     SERVICE_REGIMES,
     AttemptOutcome,
+    LogicalRequestSpec,
     ServiceRegimeId,
     aggregate_m12_metrics,
 )
@@ -45,8 +46,30 @@ def outcome(
     )
 
 
-def aggregate(values: list[AttemptOutcome]):
+def workload_for(values: list[AttemptOutcome]) -> list[LogicalRequestSpec]:
+    requests: dict[str, LogicalRequestSpec] = {}
+    for value in values:
+        requests.setdefault(
+            value.logical_request_id,
+            LogicalRequestSpec(
+                value.logical_request_id,
+                value.tenant_id,
+                value.tier,
+                value.arrival_work,
+                value.input_tokens,
+                value.requested_output_tokens,
+            ),
+        )
+    return list(requests.values())
+
+
+def aggregate(
+    values: list[AttemptOutcome],
+    *,
+    workload: list[LogicalRequestSpec] | None = None,
+):
     return aggregate_m12_metrics(
+        workload if workload is not None else workload_for(values),
         values,
         observation_start_work=0,
         observation_end_work=100,
@@ -72,6 +95,8 @@ def test_retry_work_is_charged_but_logical_tokens_are_credited_once() -> None:
     assert report.retry_amplification == 2
     assert report.strict_completed_requests == 1
     assert report.strict_useful_tokens == 120
+    assert report.strict_useful_input_tokens == 100
+    assert report.strict_useful_output_tokens == 20
     assert report.total_gpu_work == 60
     assert report.wasted_gpu_work == 15
     assert report.raw_output_token_throughput == pytest.approx(0.25)
@@ -101,7 +126,7 @@ def test_logical_shape_cannot_change_across_attempts() -> None:
         0,
         0,
     )
-    with pytest.raises(ValueError, match="shape changed"):
+    with pytest.raises(ValueError, match="differs from workload"):
         aggregate([first, changed])
 
 
@@ -132,6 +157,59 @@ def test_slo_missed_work_is_not_mixed_with_true_waste() -> None:
     report = aggregate([outcome("r1", 0, strict=False), outcome("r2", 0, wasted_p=4)])
     assert report.slo_missed_gpu_work == 30
     assert report.wasted_gpu_work == 4
+    assert report.total_gpu_work == pytest.approx(
+        report.wasted_gpu_work
+        + report.slo_missed_gpu_work
+        + report.winner_attributable_gpu_work
+        + report.unclassified_attempt_gpu_work
+    )
+
+
+def test_zero_attempt_drop_stays_in_offered_and_fairness_denominators() -> None:
+    frozen = [
+        LogicalRequestSpec("served", "tenant-a", "STRICT", 0, 100, 20),
+        LogicalRequestSpec("dropped", "tenant-b", "RELAXED", 0, 100, 20),
+    ]
+    report = aggregate([outcome("served", 0, tier="STRICT")], workload=frozen)
+    assert report.offered_logical_requests == 2
+    assert report.retry_amplification == 0.5
+    assert report.per_tier_slo_attainment == {"RELAXED": 0.0, "STRICT": 1.0}
+    assert report.jain_fairness == pytest.approx(0.5)
+    assert not report.fairness_floor_pass
+
+
+def test_completed_attempt_must_match_frozen_true_output() -> None:
+    value = outcome("r1", 0, emitted=19)
+    frozen = [LogicalRequestSpec("r1", "tenant-a", "STANDARD", 0, 100, 20)]
+    with pytest.raises(ValueError, match="frozen true output"):
+        aggregate([value], workload=frozen)
+
+
+def test_kvs_work_is_reported_outside_gpu_denominator() -> None:
+    value = outcome("r1", 0)
+    value = AttemptOutcome(
+        value.logical_request_id,
+        value.attempt_index,
+        value.tenant_id,
+        value.tier,
+        value.arrival_work,
+        value.input_tokens,
+        value.requested_output_tokens,
+        value.emitted_output_tokens,
+        value.completed,
+        value.strict_slo_met,
+        value.finish_work,
+        value.prefill_gpu_work,
+        value.decode_gpu_work,
+        value.wasted_prefill_work,
+        value.wasted_decode_work,
+        1024,
+        2.5,
+    )
+    report = aggregate([value])
+    assert report.kvs_bytes_per_horizon == pytest.approx(10.24)
+    assert report.kvs_normalized_work == 2.5
+    assert report.total_gpu_work == 30
 
 
 def test_fairness_uses_per_tenant_served_over_demand_ratios() -> None:

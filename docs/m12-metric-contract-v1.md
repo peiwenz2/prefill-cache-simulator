@@ -1,4 +1,4 @@
-# M12 Metric Contract v1
+# M12 Metric Contract v1.1
 
 状态：FROZEN FOR SYNTHETIC EVALUATION  
 Truth basis：`SYNTHETIC_SERVICE_REGIME`  
@@ -6,59 +6,70 @@ Truth basis：`SYNTHETIC_SERVICE_REGIME`
 
 ## 1. 排名目标
 
-策略不能只报 hit 或 raw TPS。M12 同时冻结两个主观察量，并用 SLO／fairness 作硬约束。
-
-| 指标 | 定义 | 防止什么 gaming |
+| 指标 | 定义 | Gate |
 |---|---|---|
-| `strict_useful_token_goodput` | SLO 内完成、每个 logical request 只计一次的 input＋output tokens／固定 observation horizon | retry 重复记产出；策略改变分母 |
-| `strict_useful_tokens_per_gpu_work` | strict useful tokens／全部 attempt 的 P＋D GPU work | 高 hit 但大量 retry／abort 浪费 |
-| `request_goodput` | SLO 内完成的 logical requests／固定 horizon | 用长请求 token 数掩盖请求饥饿 |
+| `strict_useful_token_goodput` | SLO 内完成、每个 logical request 只计一次的 input＋output tokens／固定 horizon | Primary ranking |
+| `strict_useful_input_token_goodput` | strict useful input tokens／固定 horizon | 必须单列 |
+| `strict_useful_output_token_goodput` | strict useful output tokens／固定 horizon | 相对 baseline 退化 `≤0.1%` |
+| `strict_useful_tokens_per_gpu_work` | strict useful tokens／全部 attempt 的 P＋D GPU work | Pareto efficiency |
+| `request_goodput` | SLO 内完成的 logical requests／固定 horizon | 防止长请求掩盖饥饿 |
 
-最终策略排名先看 `strict_useful_token_goodput`；效率指标只能在 offered load、SLO 和 fairness gate 全部通过后参与 Pareto。
+最终排名先看 combined strict goodput。offered load、output-side goodput、SLO 和 fairness gate 全部通过后，效率才参与 Pareto。
 
-## 2. 分子与分母
+## 2. Workload truth 与 attempt execution
 
-| 项 | 规则 |
+| 项 | 冻结规则 |
 |---|---|
-| Offered load | 按 `logical_request_id` 去重；input／requested output shape 在 retry 间必须一致 |
-| Useful tokens | 一个 logical request 最多由一个 strict winner 贡献 `input_tokens + emitted_output_tokens` |
-| GPU work | 所有 attempt 的 Prefill／Decode work 全部计入，包括失败、retry、abort |
-| Raw output | 所有 attempt emitted output 都计入，只作诊断，不能当 goodput |
-| Waste | `wasted_prefill_work + wasted_decode_work`；必须分别不超过 issued work |
-| SLO-missed work | completed 但未过 strict SLO 的非 waste GPU work；单列，不冒充 true waste |
-| Horizon | caller 显式冻结 `observation_start_work`／`observation_end_work`；策略不能按自身最后完成时间改分母 |
-| Utilization | P／D 分池报告；aggregate 只称 normalized utilization，M9-HW 前禁称 MFU |
+| Workload | 独立 `LogicalRequestSpec` 列表定义 identity、tenant、tier、arrival、input、true output；不是从 attempt 反推 |
+| Zero-attempt drop | 仍在 offered／tier／tenant demand 分母中，不能被策略藏掉 |
+| True output | evaluator 冻结；completed attempt 必须精确 emit 该长度 |
+| Stop／EOS／SLO | harness 判断；policy 不得改变 true output 或自行宣布 SLO success |
+| Retry | 每个 attempt 都收费；一个 logical request 最多一个 strict winner 获 useful credit |
+| Horizon | caller 冻结 start／end；策略不能用自己的最后完成时间改分母 |
 
-## 3. Fairness gate
+## 3. Work 与成本分类账
+
+| 分类 | 规则 |
+|---|---|
+| Prefill GPU work | 基于实际 uncached tokens 计算；cache hit 只减少一次 prefill work |
+| Decode GPU work | 所有 attempt 的 issued decode work，包括 retry／abort |
+| KVS work | bytes 与 normalized work 都报告；不混入 GPU efficiency 分母，但 M12.2 必须进入 finish／SLO scheduling |
+| True waste | abort／failed attempt 中明确不可复用的 wasted P＋D work |
+| SLO-missed | completed 但 strict SLO failed 的非 waste work |
+| Winner-attributable | strict winner 的非 waste work |
+| Unclassified | 其他 issued attempt work 的 residual bucket |
+
+守恒式：`total_gpu_work = waste + slo_missed + winner_attributable + unclassified`。`kvs_bytes_per_horizon` 是传输速率，`kvs_normalized_work` 是独立成本维度。
+
+## 4. Fairness gate
 
 | Gate | 冻结值 |
 |---|---:|
-| 每个出现的 SLO tier attainment floor | `≥ 0.80` |
-| tenant served／demand ratio 的 Jain fairness | `≥ 0.90` |
-| 相对 baseline 的单 tier 最大退化 | `≤ 0.02 absolute` |
+| 每个出现的 SLO tier attainment floor | `≥0.80` |
+| tenant served／demand ratio 的 Jain fairness | `≥0.90` |
+| 相对 baseline 的单 tier最大退化 | `≤0.02 absolute` |
+| strict output goodput 相对退化 | `≤0.001 relative` |
 
-三个条件独立报告。绝对 floor 通过不代表允许相对 baseline 退化；后者在 M12.2 横比时启用。
+## 5. Synthetic service regimes
 
-## 4. 三套 synthetic service regimes
-
-这些参数是 sensitivity grid，不是硬件拟合值。所有输出保持 `NORMALIZED_WORK`。
-
-| Regime | Prefill token work | Decode token work | Prefill batch max saving | Decode batch max saving | KVS byte work |
+| Regime | Prefill token work | Decode token work | Prefill batch saving | Decode batch saving | KVS byte work |
 |---|---:|---:|---:|---:|---:|
 | COMPUTE_BOUND | 0.0800 | 1.0000 | 0.45 | 0.20 | 1.0e-7 |
 | MEMORY_BOUND | 0.0400 | 1.4000 | 0.15 | 0.35 | 2.5e-7 |
 | MIXED | 0.0568 | 1.0000 | 0.30 | 0.25 | 1.5e-7 |
 
-Batch saving 使用冻结的 piecewise-linear saturation；它只制造三种排序压力。normalized simulation 的 kill 可以终止方案，pass 只算 provisional。
+参数只是 sensitivity grid，不是硬件拟合值。normalized kill 是 final；pass 只是 provisional。
 
-## 5. Conservation invariants
+M12.2 grid 必须包含 KVS-disabled、KVS-expensive extreme，以及至少一个 decode-binding cell。KVS cost 必须推进 completion time 并影响 strict SLO，而不只是出现在报表里。
 
-1. `(logical_request_id, attempt_index)` 全局唯一。
-2. `total_gpu_work = prefill_gpu_work + decode_gpu_work`。
-3. `wasted_gpu_work ≤ total_gpu_work`。
-4. strict completed request 不能没有 finish；未完成 attempt 不能命中 strict SLO。
-5. offered logical requests／tokens／horizon 不随 attempt 数量变化。
-6. retry 可以增加 raw output 和 GPU work，不能重复增加 useful tokens。
+## 6. Conservation invariants
+
+1. Workload identity 与 `(logical_request_id, attempt_index)` 分别唯一。
+2. Attempt 必须引用 workload，并完全匹配冻结 shape。
+3. completed output 必须等于 frozen true output。
+4. offered requests／tokens／horizon 不随 attempt 数量变化。
+5. retry 可增加 raw output、GPU／KVS work，不能重复增加 useful tokens。
+6. P／D 分池 utilization 只称 normalized utilization；M9-HW 前禁止称 MFU。
 
 实现：`src/prefill_cache_sim/m12_metrics.py`。  
 验证：`tests/test_m12_metrics.py`、`results/m12-metrics/`。

@@ -994,7 +994,7 @@ M12.0 结果：trace 只有 1,180 个 timestamp buckets，正间隔为 3,049～3
 
 Gate G12-1：metric conservation、attempt 去重、offered-load 固定和 truth-basis 测试全部通过；否则不进入策略横比。
 
-M12.1 结果：`m12-metric-contract-v1` 已冻结；三套 regime 共 18 个 service-grid cells，contract fixture 在相同 offered load／horizon 下验证 retry amplification=`1.3333`、每个 logical request 只计一次、所有 attempt GPU work 全计费。三套 fixture 的 strict useful-token goodput 均为 `12.48`（同一完成集合，证明分子不随 cost model 漂移），但 GPU efficiency／P-D utilization／waste fraction 随 regime 改变，说明资源解释维度已解耦。所有值是 contract fixture，不是策略收益。artifact：`results/m12-metrics/`；正式合同：`docs/m12-metric-contract-v1.md`。
+M12.1 结果：`m12-metric-contract-v1.1` 已冻结；workload truth 与 attempts 分离，zero-attempt drop 仍计 offered／fairness 分母，true output 由 harness 冻结。combined／input／output strict goodput 分列，output 相对 baseline 退化不得超过 0.1%。全部 attempt 的 P＋D work 计费，KVS normalized work 独立报告并须进入 M12.2 completion scheduling；GPU work 由 waste／SLO-missed／winner／unclassified 四桶守恒。三套 regime 共 18 个 fixture cells，只证明口径不随 cost model 漂移，不是策略收益。artifact：`results/m12-metrics/`；正式合同：`docs/m12-metric-contract-v1.md`。
 
 #### M12.2｜Priced Spill／Reuse-Adjusted Binpack
 
