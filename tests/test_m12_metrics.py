@@ -9,6 +9,7 @@ from prefill_cache_sim.m12_metrics import (
     AttemptOutcome,
     LogicalRequestSpec,
     ServiceRegimeId,
+    _nonnegative_taxonomy_remainder,
     aggregate_m12_metrics,
 )
 
@@ -100,6 +101,40 @@ def test_retry_work_is_charged_but_logical_tokens_are_credited_once() -> None:
     assert report.total_gpu_work == 60
     assert report.wasted_gpu_work == 15
     assert report.raw_output_token_throughput == pytest.approx(0.25)
+
+
+def test_taxonomy_tolerates_only_roundoff_at_large_work_scale() -> None:
+    values = [
+        outcome(
+            f"r{index}",
+            0,
+            strict=index % 2 == 0,
+            p_work=1_000_000 + (index + 1) * 0.08,
+            d_work=0,
+        )
+        for index in range(17)
+    ]
+    report = aggregate_m12_metrics(
+        workload_for(values),
+        values,
+        observation_start_work=0,
+        observation_end_work=20_000_000,
+        prefill_nodes=2,
+        decode_nodes=2,
+    )
+    assert report.unclassified_attempt_gpu_work == 0
+    assert report.total_gpu_work == pytest.approx(
+        report.winner_attributable_gpu_work + report.slo_missed_gpu_work
+    )
+    total = 17_000_012.24
+    one_ulp_over = total + math.ulp(total)
+    assert _nonnegative_taxonomy_remainder(total, one_ulp_over, summand_count=17) == 0
+    with pytest.raises(ValueError, match="over-counted"):
+        _nonnegative_taxonomy_remainder(
+            total,
+            total + 1e-5,
+            summand_count=17,
+        )
 
 
 def test_duplicate_attempt_identity_is_rejected() -> None:

@@ -14,6 +14,7 @@ from prefill_cache_sim.m12_kernel import (
     KernelPolicy,
     KernelRequestSpec,
     _CacheSnapshotStore,
+    _remaining_queue_work,
 )
 from prefill_cache_sim.m12_metrics import LogicalRequestSpec
 
@@ -437,6 +438,109 @@ def test_same_time_later_arrival_observes_kernel_owned_p_queue_work() -> None:
     kernel().run([request("a"), request("b")], policy)
     assert policy.queued == [0, 0]
     assert policy.available == [0, 1]
+
+
+def test_completed_decimal_prefill_queue_is_clamped_to_zero() -> None:
+    input_tokens = (
+        6755,
+        7319,
+        7234,
+        2287,
+        9013,
+        6506,
+        4824,
+        3119,
+        23090,
+        3135,
+        26874,
+        10487,
+        17448,
+        6253,
+        6725,
+    )
+    p_nodes = (
+        "p1",
+        "p0",
+        "p1",
+        "p0",
+        "p0",
+        "p1",
+        "p0",
+        "p1",
+        "p0",
+        "p1",
+        "p1",
+        "p0",
+        "p1",
+        "p0",
+        "p0",
+    )
+
+    class QueueDriftObserver(RecordingPolicy):
+        def __init__(self) -> None:
+            super().__init__(
+                {
+                    f"r{i}": (attempt(f"r{i}", p_node=p_node),)
+                    for i, p_node in enumerate(p_nodes)
+                }
+            )
+            self.observed: tuple[float, float] | None = None
+
+        def plan_attempts(self, request, view):
+            if request.logical.logical_request_id == "observer":
+                self.observed = (
+                    view.queued_prefill_work["p0"],
+                    view.queued_prefill_work["p1"],
+                )
+            return super().plan_attempts(request, view)
+
+        def cache_mutation(self, request, attempt, view):
+            return CacheMutation(admit=False)
+
+    workload = [
+        request(f"r{i}", input_tokens=tokens) for i, tokens in enumerate(input_tokens)
+    ]
+    workload.append(request("observer", arrival=15_260))
+    policy = QueueDriftObserver()
+    kernel(end=30_000, prefill_rate=0.08).run(workload, policy)
+    assert policy.observed == (0.0, 0.0)
+
+
+def test_queue_recovery_preserves_small_work_absorbed_by_large_aggregate() -> None:
+    assert _remaining_queue_work(None) == 0
+    assert _remaining_queue_work((1e-10,)) == 1e-10
+    assert _remaining_queue_work((1e-7,)) == 1e-7
+
+    class AbsorptionObserver(RecordingPolicy):
+        def __init__(self) -> None:
+            super().__init__(
+                {
+                    "blocker": (attempt("blocker", p_node="p0"),),
+                    "huge": (attempt("huge", arrival=0.5, p_node="p0"),),
+                    "tiny": (attempt("tiny", arrival=0.5, p_node="p0"),),
+                }
+            )
+            self.observed: float | None = None
+
+        def plan_attempts(self, request, view):
+            if request.logical.logical_request_id == "observer":
+                self.observed = view.queued_prefill_work["p0"]
+            return super().plan_attempts(request, view)
+
+        def cache_mutation(self, request, attempt, view):
+            return CacheMutation(admit=False)
+
+    policy = AbsorptionObserver()
+    kernel(end=2_000_000_000, prefill_rate=1e-10).run(
+        [
+            request("blocker", input_tokens=10_000_000_000),
+            request("huge", arrival=0.5, input_tokens=10_000_000_000_000_000_000),
+            request("tiny", arrival=0.5, input_tokens=1),
+            request("observer", arrival=1),
+        ],
+        policy,
+    )
+    assert policy.observed == 1e-10
 
 
 def test_zero_attempt_drop_remains_offered_and_jain_uses_tenants() -> None:

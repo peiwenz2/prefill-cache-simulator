@@ -227,6 +227,27 @@ class M12MetricReport:
         return asdict(self)
 
 
+def _nonnegative_taxonomy_remainder(
+    total_work: float,
+    classified_work: float,
+    *,
+    summand_count: int,
+) -> float:
+    """Return the residual, allowing only a few ULPs of fsum regrouping error."""
+    remainder = total_work - classified_work
+    if remainder >= 0:
+        return remainder
+    if summand_count <= 0:
+        raise ValueError("taxonomy summand count must be positive")
+    grouping_depth = max(2, math.ceil(math.log2(summand_count)) + 1)
+    tolerance = grouping_depth * max(
+        math.ulp(abs(total_work)), math.ulp(abs(classified_work))
+    )
+    if abs(remainder) <= tolerance:
+        return 0.0
+    raise ValueError("GPU work taxonomy over-counted total issued work")
+
+
 def aggregate_m12_metrics(
     workload: Sequence[LogicalRequestSpec],
     attempts: Sequence[AttemptOutcome],
@@ -265,15 +286,15 @@ def aggregate_m12_metrics(
         if identity in identities:
             raise ValueError(f"duplicate attempt identity: {identity}")
         identities.add(identity)
-        request = frozen_workload.get(attempt.logical_request_id)
-        if request is None:
+        matched_request = frozen_workload.get(attempt.logical_request_id)
+        if matched_request is None:
             raise ValueError(f"attempt references unknown workload ID: {identity[0]}")
         shape = (
-            request.tenant_id,
-            request.tier,
-            request.arrival_work,
-            request.input_tokens,
-            request.true_output_tokens,
+            matched_request.tenant_id,
+            matched_request.tier,
+            matched_request.arrival_work,
+            matched_request.input_tokens,
+            matched_request.true_output_tokens,
         )
         attempt_shape = (
             attempt.tenant_id,
@@ -286,7 +307,7 @@ def aggregate_m12_metrics(
             raise ValueError(f"attempt shape differs from workload: {identity[0]}")
         if (
             attempt.completed
-            and attempt.emitted_output_tokens != request.true_output_tokens
+            and attempt.emitted_output_tokens != matched_request.true_output_tokens
         ):
             raise ValueError(
                 f"completed output differs from frozen true output: {identity[0]}"
@@ -315,13 +336,13 @@ def aggregate_m12_metrics(
         winner.emitted_output_tokens for winner in strict_winners.values()
     )
     strict_useful = strict_input + strict_output
-    prefill_work = sum(value.prefill_gpu_work for value in attempts)
-    decode_work = sum(value.decode_gpu_work for value in attempts)
-    total_work = prefill_work + decode_work
-    waste = sum(
+    prefill_work = math.fsum(value.prefill_gpu_work for value in attempts)
+    decode_work = math.fsum(value.decode_gpu_work for value in attempts)
+    total_work = math.fsum((prefill_work, decode_work))
+    waste = math.fsum(
         value.wasted_prefill_work + value.wasted_decode_work for value in attempts
     )
-    slo_missed_work = sum(
+    slo_missed_work = math.fsum(
         value.prefill_gpu_work
         + value.decode_gpu_work
         - value.wasted_prefill_work
@@ -329,17 +350,19 @@ def aggregate_m12_metrics(
         for value in attempts
         if value.completed and not value.strict_slo_met
     )
-    winner_work = sum(
+    winner_work = math.fsum(
         winner.prefill_gpu_work
         + winner.decode_gpu_work
         - winner.wasted_prefill_work
         - winner.wasted_decode_work
         for winner in strict_winners.values()
     )
-    unclassified_work = total_work - waste - slo_missed_work - winner_work
-    if unclassified_work < -1e-9:
-        raise ValueError("GPU work taxonomy over-counted total issued work")
-    unclassified_work = max(0.0, unclassified_work)
+    classified_work = math.fsum((waste, slo_missed_work, winner_work))
+    unclassified_work = _nonnegative_taxonomy_remainder(
+        total_work,
+        classified_work,
+        summand_count=max(1, len(attempts) * 2),
+    )
     raw_output = sum(value.emitted_output_tokens for value in attempts)
 
     tenant_demand: defaultdict[str, int] = defaultdict(int)

@@ -9,7 +9,7 @@ from __future__ import annotations
 import heapq
 import math
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -21,6 +21,15 @@ from .m12_metrics import (
     M12MetricReport,
     aggregate_m12_metrics,
 )
+
+
+def _remaining_queue_work(
+    remaining_components: Iterable[float] | None,
+) -> float:
+    """Update the queue proxy using the waiting heap as structural truth."""
+    if remaining_components is None:
+        return 0.0
+    return math.fsum(remaining_components)
 
 
 @dataclass(frozen=True, slots=True)
@@ -493,8 +502,16 @@ class CausalKernel:
                 assert isinstance(start_key, tuple)
                 item = pending[start_key]
                 self._price_prefill(item, cache)
-                queued_work[item.spec.p_node_id] -= self._maximum_prefill_work(
-                    item.request
+                node_id = item.spec.p_node_id
+                queued_work[node_id] = _remaining_queue_work(
+                    (
+                        (
+                            self._maximum_prefill_work(pending[key].request)
+                            for _, _, key in p_waiting[node_id]
+                        )
+                        if p_waiting[node_id]
+                        else None
+                    ),
                 )
                 finish = at + item.prefill_work + item.kvs_work
                 item.prefill_finish = finish
