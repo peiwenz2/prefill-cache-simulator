@@ -1,0 +1,53 @@
+{
+  "claims": {
+    "mfu_allowed": false,
+    "normalized_kill_final": true,
+    "normalized_pass_provisional": true,
+    "wall_clock_allowed": false
+  },
+  "efficiency_metric": "strict_useful_tokens_per_gpu_work",
+  "fairness": {
+    "max_tier_regression_absolute": 0.02,
+    "minimum_jain_fairness": 0.9,
+    "minimum_tier_slo_attainment": 0.8
+  },
+  "primary_metric": "strict_useful_token_goodput",
+  "provenance": {
+    "git_dirty": false,
+    "git_sha": "1dd3075d62ad3772208bf1fc94e93f7fc80f2d6c"
+  },
+  "regimes": [
+    {
+      "decode_batch_max_saving": 0.2,
+      "decode_batch_saturation_sequences": 64,
+      "decode_token_work": 1.0,
+      "kvs_byte_work": 1e-07,
+      "prefill_batch_max_saving": 0.45,
+      "prefill_batch_saturation_tokens": 65536,
+      "prefill_token_work": 0.08,
+      "regime_id": "COMPUTE_BOUND"
+    },
+    {
+      "decode_batch_max_saving": 0.35,
+      "decode_batch_saturation_sequences": 32,
+      "decode_token_work": 1.4,
+      "kvs_byte_work": 2.5e-07,
+      "prefill_batch_max_saving": 0.15,
+      "prefill_batch_saturation_tokens": 32768,
+      "prefill_token_work": 0.04,
+      "regime_id": "MEMORY_BOUND"
+    },
+    {
+      "decode_batch_max_saving": 0.25,
+      "decode_batch_saturation_sequences": 48,
+      "decode_token_work": 1.0,
+      "kvs_byte_work": 1.5e-07,
+      "prefill_batch_max_saving": 0.3,
+      "prefill_batch_saturation_tokens": 49152,
+      "prefill_token_work": 0.0568,
+      "regime_id": "MIXED"
+    }
+  ],
+  "schema_version": "m12-metric-contract-v1",
+  "truth_basis": "SYNTHETIC_SERVICE_REGIME"
+}

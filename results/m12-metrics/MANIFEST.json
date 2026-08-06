@@ -1,0 +1,8 @@
+{
+  "files": {
+    "contract.json": "954d918773898b04ab57b184f23335dc67f1bd1100468b8f35ea31df0c53317e",
+    "regime_grid.csv": "3934b881f61012b6b98a4a78e925abc08fa5d83215b0b81332f4cf46e8be236c",
+    "validation.json": "bb465df9b03bb201c8d59f80595ef46f25fd9cd5edffd969ed1fb0f6bf561f6d"
+  },
+  "schema_version": "m12-metrics-manifest-v1"
+}
