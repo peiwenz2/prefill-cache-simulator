@@ -5,6 +5,93 @@
 - 数据集：Mooncake `mooncake_trace.jsonl`，23,608 requests，512-token prefix blocks
 - 证据等级：论文原文＋本地 deterministic replay；真实 GPU／KVT／生产 shadow 仍未完成
 
+## 0. Data Description：这份 trace 到底给了什么
+
+### 0.1 文件与字段
+
+实际使用文件 SHA-256：`b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711`，4.2 MiB，23,608 行 JSONL，覆盖相对时间 0～3,600,000 ms。每一行只有四个原生字段：
+
+| 字段 | 含义 | 可以推导什么 | 不能推导什么 |
+|---|---|---|---|
+| `timestamp` | 相对到达时间，单位 ms | arrival order、inter-arrival、idle age | 真实日期；同毫秒内的真实先后 |
+| `input_length` | prompt token 数 | prefill work、tail block 大小 | token 内容、语义、模型 template |
+| `output_length` | decode token 数 | decode work proxy | 实际 TPOT、finish reason、优先级 |
+| `hash_ids` | 512-token block 的 chained prefix hash ID | exact-prefix reuse relationship | 原始 token、session_id、user_id |
+
+数据文件实测统计：
+
+| 指标 | 值 |
+|---|---:|
+| Requests | 23,608 |
+| Input tokens | 202,791,701；mean 8,589.96；median 6,345；interpolated P95 26,078.55；range 890～125,546 |
+| Output tokens | 4,299,817；mean 182.13；median 30；P95 600；range 1～2,000 |
+| Block references | 409,356 |
+| Unique block IDs | 183,166 |
+| Partial-tail requests | 23,581／23,608 |
+| Unique timestamps | 1,180；adjacent same-timestamp pairs 22,428 |
+
+论文正文写 average input length 7,590，但当前公开文件的精确和是 202,791,701，除以 23,608 得 8,589.96。本仓所有结果以固定 SHA 的实际文件为准，不修改数据去贴论文平均值。
+
+### 0.2 为什么 block size 是 512
+
+论文定义 `hash_ids[i]` 为第 `i` 个 512-token block 的 prefix hash：它不仅包含当前 block，还链入之前所有 block。因此相同 ID 表示“从 prompt 开头到这里都一致”。一条 `input_length=6,755` 的请求有 `ceil(6755/512)=14` 个 ID；前 13 块各 512 tokens，最后一块 99 tokens。loader 在 `trace.py:104-120` 严格验证这个关系。
+
+这也决定了命中必须是 strict prefix：如果 block 0、1 命中，block 2 miss，即使 block 3 恰好 resident，也不能跳过 block 2 继续算 hit。实现见 `cache.py:45-71` 与 `analyzer.py:68-77`。
+
+### 0.3 Block hit 与 Token-weighted hit
+
+| Metric | 分子 | 分母 | 为什么两个数不同 |
+|---|---|---|---|
+| Block-ref hit | 所有请求中连续命中的 block reference 数 | 409,356 block references | 每块按 1 计数，partial tail 也算一块 |
+| Token-weighted hit | 连续命中 block 实际覆盖的 token 数 | 202,791,701 input tokens | 完整块计 512，tail 按真实 token 数 |
+
+无限容量、无过期、strict prefix 的 workload ceiling：
+
+- Block-ref：`226,190 / 409,356 = 55.2550836%`。
+- Token-weighted：`115,733,271 / 202,791,701 = 57.0700233%`。
+
+Token-weighted 更高，说明被复用的完整长 block 略多，而大量 compulsory miss 落在短 tail。两个 metric 都是 cache reuse，不是 request hit rate，也不是 TTFT improvement。
+
+### 0.4 Idle TTL 实验的准确假设
+
+Idle TTL 是本仓额外的 diagnostic，不是 Mooncake Table 1，也不是论文配置。其假设必须完整写成：
+
+1. **Capacity infinite**：不发生容量 eviction。
+2. **Idle expiration**：`now - last_access > TTL` 时 block expire；不是“创建后固定寿命”。
+3. **Hit renew**：命中的 block 把 `last_access` 刷新到当前 request timestamp，这等价于 LRU recency refresh。
+4. **Strict prefix matching**：遇到第一个不存在或过期的 block，后续 block 全部不计 hit。
+5. **Instantaneous trace-time insertion**：lookup 后把当前请求的 blocks 立即写入并更新时间；不模拟 prefill queue／completion visibility。
+6. **Single global namespace**：不是 per-GPU cache，也没有 remote transfer cost。
+
+| Idle TTL | Block-ref hit | Token-weighted hit |
+|---:|---:|---:|
+| 1 s | 28.81% | 29.77% |
+| 5 s | 33.75% | 34.89% |
+| 10 s | 33.95% | 35.08% |
+| 30 s | 34.96% | 36.12% |
+| 60 s | 37.92% | 39.17% |
+| 120 s | 44.33% | 45.79% |
+| 300 s | 51.10% | 52.78% |
+| 600 s | 54.53% | 56.33% |
+| 1,800 s | 55.22% | 57.04% |
+| 3,600 s／∞ | 55.26% | 57.07% |
+
+这张表只回答 temporal locality 能跨多长时间。它不包含 LRU capacity eviction；严格说是“infinite capacity＋idle expiry＋hit renew”，不能简称为“LRU benchmark”。
+
+### 0.5 能否判断 session
+
+**不能确定真实 session。**数据集没有 `session_id`、`conversation_id`、`user_id` 或 messages。论文只说采样时优先保留同 session 请求，以保存 caching relationships；这不等于 trace 暴露了 session label。
+
+`hash_ids` 只能构造 causal prefix family proxy：
+
+- 同一 session 的追加对话通常共享较长 prefix，因此可能被 link。
+- 不同 session 也可能共享 system prompt／相同文档，因此会 false merge。
+- 同一 session 如果 template、截断或上下文发生变化，也可能 false split。
+- depth=1 只有 4 个 prefix families，最大 family 有 10,938 requests，证明第一块主要是超热公共前缀，不能拿它当 session key。
+- 23,608 requests 只有 1,180 个不同 timestamp，同毫秒内无法恢复真实会话顺序。
+
+S4 的 `OnlineConversationLinker` 因而明确是 online proxy：只使用当前请求之前见过的 prefix，要求 minimum shared blocks，排除 hot-only prefix，并设置 family size cap（`affinity.py:37-114`）。在真实系统里应替换为经过 privacy-safe hashing 的真实 session key；当前 S4 结果不能宣称是“真实 session selector 收益”。
+
 ## 1. 总体架构
 
 ### 先给结论
@@ -122,6 +209,12 @@ D1 的恢复路径在 `decode_lease.py:174-221`；自适应 quantum 在 `decode_
 | 4 | Shared KVS | 约 4.7% modeled cost/effective-prefix benefit | synthetic KVT | **是 SLO selector 的基础，不是独立神技** |
 | 5 | D2 preemption | 尚无可信绝对收益 | upper-bound only | **战略 option，当前不能估值** |
 
+### 3.1.1 Production baseline 错配警告
+
+`+9.71 pp` 只表示 S3 相对 **Random** 的 locality mechanism gain，不能当作相对线上收益。M4 中 production-style cache-aware baseline 已达到 S5=52.32%、S6=53.37%；S3=54.01% 相对它们只有约 0.6～1.7 pp simulator headroom，S4=53.34% 与 S6 基本持平。DashScope 线上已有 FlexLB／Turbo cache-aware owner，因此任何“生产提升”目前都是 NOT_MEASURED，必须由 R1 shadow 给出。
+
+S4 更合理的 value statement 是：**在本次 replay 中，用约 0.67 pp token hit 代价，把 request load max/mean 从 1.822 降到 1.047，偏斜下降约 42.5%（或 S3 相对 S4 高约 74%）**。这里描述的是 simulator trade-off，不是生产收益。
+
 ### 3.2 价值不是相加关系
 
 ```text
@@ -186,14 +279,20 @@ S3 的 54.01% 距无限单池 token ceiling 57.07% 约 3.06 pp，但有限多节
 
 这一轮只审方案，不展开下一阶段方案。要让现有结论升级，必须按下面的 falsification gate 验收。
 
-| Gate | 状态 | 要证明什么 | 通过标准 |
-|---|---|---|---|
-| B0 Global parity | 未实现 | 本仓能否复现论文 Table 1 趋势 | 单 global pool，1k／10k／30k／50k／100k／Inf，LRU≥LFU/LengthAware 趋势一致；差异解释到分母和 tail policy |
-| B1 Tier fidelity | 未实现 | HBM／DRAM／remote／SSD 是否被正确区分 | 每 tier 单独 capacity／latency／bandwidth／eviction；token conservation=100% |
-| M9-HW | harness 完成，evidence 未取得 | cost model 是否有物理单位 | 真实 engine provenance；prefill、decode、KVT、overlap residual gate 通过 |
-| M10-HW | harness 完成，evidence 未取得 | synthetic 策略排序是否保留 | frozen plan；tau-b 达门；压力臂能产生非平凡 queue/KVT contention |
-| R1 shadow | collector 完成，未跑 3 天 | 生产 cache view 与 session proxy 是否可信 | 3 天零 enforce；missing／divergence／fail-open 分开；owner signoff |
-| D2 gate | 未实现真实恢复 | preemption 是否真的增加 completed goodput | 真实 resume；duplicate/loss=0；preemptions/completed≤0.25；fairness 不退化 |
+| 优先级 | Gate | 状态 | 要证明什么 | 通过标准 |
+|---|---|---|---|---|
+| 1 | R1 shadow | collector 完成，未跑 3 天 | 生产 baseline 之上还有多少 locality／load-skew headroom | owner signoff＋privacy-safe real session key；3 天零 enforce；missing／divergence／fail-open 分账 |
+| 2，可与 R1 并行 | B0＋B0.5 | 未实现 | 复现论文 Table 1 趋势；TTL 表入仓可复现 | global pool 六档容量；LRU／LFU／LengthAware；TTL generator 一键出表 |
+| 3，立即排队 | M9-HW | harness 完成，evidence 未取得 | cost model 是否有物理单位 | 真实 engine provenance；prefill／decode／KVT／overlap residual gate |
+| 4 | M10-HW | harness 完成，evidence 未取得 | synthetic 排序是否跨硬件保留 | M9-HW 完成；frozen plan；真实压力 tau-b gate |
+| defer | B1 Tier fidelity | 仅保留最小模型 | 四层精细建模是否会改变决策 | M9-HW 前不增加“更精细的假参数”；只保留 conservation 与 B0 必需子集 |
+| freeze | D2 gate | upper-bound only | preemption 是否真的增加 completed goodput | Q5／Q6 与真实 resume 前不投入实现 |
+
+### 5.1 Kill／narrow criteria
+
+1. **WHERE line kill**：R1 若显示 production baseline 距可用 locality ceiling 小于 2 pp，且 load skew 没有可改善空间，关闭 selector enforcement 线；保留 lifecycle RFC。
+2. **S4 kill**：拿不到 privacy-safe real session key，S4 降为 research result；不把 prefix-family proxy 上线。
+3. **Gated-PD narrow**：M9-HW 后若 P2 收益变号或小于 5%，降级为 overload-only protection，不作为常态 throughput optimization。
 
 ## 6. 引用
 

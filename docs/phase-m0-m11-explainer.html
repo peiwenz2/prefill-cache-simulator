@@ -335,11 +335,12 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
       <h4>不可宣称框（must-not-claim）——以下句式在任何汇报里都不允许出现</h4>
       <ol>
         <li>❌ "仿真显示 TTFT 降低 X ms／SLO 提升 X%"——时间单位是 NORMALIZED_WORK，无毫秒语义；带 <code>_ms</code> 后缀的字段同样是归一化工作量。</li>
-        <li>❌ "610 测试通过，可以上线"——测试只覆盖仿真器与 mock 链路，不含生产 E2E／canary。</li>
+        <li>❌ "682 测试通过，可以上线"——测试只覆盖仿真器与 mock 链路，不含生产 E2E／canary。</li>
         <li>❌ "M9 已完成标定"——只有 harness，<code>calibration_status=SYNTHETIC_UNCALIBRATED</code>。</li>
         <li>❌ "M10 tau_b=1.0 证明排序在生产可复现"——弱证据，压力不足，需 M10-HW 重测。</li>
         <li>❌ "S3 比 S4 好（或反之）"——两者是不同 trade-off，M4 只给 diff。</li>
         <li>❌ "D2 抢占收益已验证"——M8 是 ASSUME_RESUME_SUCCESS_UPPER_BOUND 上界模型。</li>
+        <li>❌ "S3 比线上提升 9.71 pp"——9.71 pp 是相对 Random；相对 S5／S6 simulator baseline 只有约 0.6～1.7 pp，production headroom 未测量。</li>
       </ol>
     </div>
 
@@ -451,7 +452,7 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
       <li>Markdown 版全文：<code>docs/phase-m0-m11-explainer.md</code>（含审读清单）</li>
       <li>外部原型参照：Turbo <code>CacheAwareScheduler.java:1196-1202</code>／<code>StickySessionScheduler.java:613-670</code>；RTP-LLM <code>ShortestTTFTStrategy.java:187-205</code>（引用自 DESIGN-v3 §1）</li>
     </ul>
-    <p class="smallnote">本地验证记录（非 artifact）：610 测试通过、ruff clean——仅证明代码自洽，不构成 E2E／canary 证据。</p>
+    <p class="smallnote">本地验证记录（非 artifact）：682 测试通过、ruff clean——仅证明代码自洽，不构成 E2E／canary 证据。</p>
   </section>
 
   </main>

@@ -96,7 +96,7 @@ E0 FIFO、E1 LRU、E2 SLRU、E3 二次命中准入 + LRU、E4 链感知价值淘
 | M10 | 回放验证 harness（三源对账 + 影子决策 + 故障注入） | 控制实验 3 注入 = 3 回收 | SYNTHETIC_REPLAY，`hardware_validation=BLOCKED_NO_ENGINE_ACCESS` |
 | M11 | 生产 RFC + 全链路 mock（7 场景协议不变量） | mock 断言，非 E2E | HARNESS_ONLY／RFC |
 
-本地验证记录（非 artifact，属会话记录）：610 个测试通过，ruff clean。**这只证明代码自洽，不是 E2E 或 canary 证据。**
+本地验证记录（非 artifact，属会话记录）：682 个测试通过，ruff clean。**这只证明代码自洽，不是 E2E 或 canary 证据。**
 
 ---
 
@@ -167,12 +167,13 @@ safety_margin 0.1→50→100→200 时 `preemptions_per_completed_request` 0.379
 以下句式在任何汇报里都**不允许**出现：
 
 1. ❌ "仿真显示 TTFT 降低 X ms／SLO 提升 X%" ——时间单位是 NORMALIZED_WORK，无毫秒语义。
-2. ❌ "610 测试通过，可以上线" ——测试只覆盖仿真器与 mock 链路，不含任何生产 E2E／canary。
+2. ❌ "682 测试通过，可以上线" ——测试只覆盖仿真器与 mock 链路，不含任何生产 E2E／canary。
 3. ❌ "M9 已完成标定" ——M9 只有 harness，`calibration_status=SYNTHETIC_UNCALIBRATED`，M9-HW 被真实 `MachineProvenance` 缺失阻塞。
 4. ❌ "M10 tau_b=1.0 证明排序在生产可复现" ——那是弱证据，压力不足；需要 M10-HW 在硬件校准后重测。
 5. ❌ "S3 比 S4 好（或反之）" ——两者是不同 trade-off（命中 vs 偏斜），M4 只给 diff 不下总评。
 6. ❌ "D2 抢占收益已验证" ——M8 是 ASSUME_RESUME_SUCCESS_UPPER_BOUND 上界模型。
 7. ❌ 任何把 `_ms` 字段当 wall-clock 的引用。
+8. ❌ "S3 比线上提升 9.71 pp" ——9.71 pp 是相对 Random；相对 S5／S6 simulator baseline 只有约 0.6～1.7 pp，production headroom 未测量。
 
 ---
 
@@ -229,7 +230,7 @@ safety_margin 0.1→50→100→200 时 `preemptions_per_completed_request` 0.379
 - [ ] 本文 §4 每个数字都能在对应 artifact 中找到原值（抽查 M7 表与 M9 系数）。
 - [ ] 本文 §5 的七条禁句没有在任何对外材料中出现。
 - [ ] 两条并行线的进入条件里，M9-HW 的 `MachineProvenance` 阻塞项与 G0 的 owner 名单都还没解除——若已解除，本文需要更新。
-- [ ] 610 测试／ruff clean 只作为"代码自洽"证据引用，未被升格为验收证据。
+- [ ] 682 测试／ruff clean 只作为"代码自洽"证据引用，未被升格为验收证据。
 
 ---
 
