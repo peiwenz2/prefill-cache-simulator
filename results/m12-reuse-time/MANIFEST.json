@@ -1,0 +1,9 @@
+{
+  "files": {
+    "config.json": "0f48d2e00a3ea395bb06013340b4e5fdd9c363cdbbcfaddaaa2dfa9195dad80c",
+    "report.json": "2a5e3c838ada7af7c9e795c026ac4096702f5d5c09a9b0627e7ff20e51ec96bf",
+    "results.csv": "710ab4801d4508caf50bd7b69c5f113cbebaf5779d0f2fe553780fc4886b4340",
+    "reuse_cdf.svg": "27400b5af8cac01013d5f9c202ad3a682192aa8ee59c126f78b41e05382125e7"
+  },
+  "schema_version": "m12-reuse-time-manifest-v1"
+}

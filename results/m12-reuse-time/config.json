@@ -1,0 +1,25 @@
+{
+  "block_size_tokens": 512,
+  "family_anchor_depth": 4,
+  "gate": {
+    "caliber": "token_weighted_causal_hot_excluded",
+    "threshold": 0.1,
+    "window_ms": 250
+  },
+  "hot": {
+    "minimum_references": 8,
+    "percentile": 99.0,
+    "refresh_requests": 256
+  },
+  "schema_version": "m12-reuse-time-config-v1",
+  "windows_ms": [
+    10,
+    50,
+    100,
+    250,
+    1000,
+    5000,
+    60000,
+    300000
+  ]
+}
