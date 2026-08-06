@@ -1,0 +1,13 @@
+metric,schema_version,baseline_arm_id,candidate_arm_id,outcome,enforced,reasons,reconciled_fraction,disagreement_fraction,tau_b,baseline_score,candidate_score,policy_policy_version,policy_minimum_reconciled_fraction,policy_maximum_disagreement_fraction,policy_minimum_tau_b
+token_weighted_hit_rate,m10-shadow-v1,S0_RANDOM,S3_GB_PREFIX_BUCKET,SHADOW_RECOMMENDED,False,,1.0,0.0,1.0,0.34403309236012575,0.3515095817456554,m10-shadow-gate-v1,0.99,0.01,0.8
+token_weighted_hit_rate,m10-shadow-v1,S0_RANDOM,S5_FLEXLB_TTFT,SHADOW_WITHHELD,False,CANDIDATE_DOES_NOT_BEAT_BASELINE,1.0,0.0,1.0,0.34403309236012575,0.3423937254710438,m10-shadow-gate-v1,0.99,0.01,0.8
+token_weighted_hit_rate,m10-shadow-v1,S0_RANDOM,S4_SESSION_AFFINITY,SHADOW_RECOMMENDED,False,,1.0,0.0,1.0,0.34403309236012575,0.3450661326619081,m10-shadow-gate-v1,0.99,0.01,0.8
+block_ref_hit_rate,m10-shadow-v1,S0_RANDOM,S3_GB_PREFIX_BUCKET,SHADOW_RECOMMENDED,False,,1.0,0.0,1.0,0.3328862896842846,0.34013914538934326,m10-shadow-gate-v1,0.99,0.01,0.8
+block_ref_hit_rate,m10-shadow-v1,S0_RANDOM,S5_FLEXLB_TTFT,SHADOW_WITHHELD,False,CANDIDATE_DOES_NOT_BEAT_BASELINE,1.0,0.0,1.0,0.3328862896842846,0.33129354400570654,m10-shadow-gate-v1,0.99,0.01,0.8
+block_ref_hit_rate,m10-shadow-v1,S0_RANDOM,S4_SESSION_AFFINITY,SHADOW_RECOMMENDED,False,,1.0,0.0,1.0,0.3328862896842846,0.33390252005589266,m10-shadow-gate-v1,0.99,0.01,0.8
+logical_token_weighted_hit_rate,m10-shadow-v1,S0_RANDOM,S3_GB_PREFIX_BUCKET,SHADOW_RECOMMENDED,False,,1.0,0.0,1.0,0.34403309236012575,0.3515095817456554,m10-shadow-gate-v1,0.99,0.01,0.8
+logical_token_weighted_hit_rate,m10-shadow-v1,S0_RANDOM,S5_FLEXLB_TTFT,SHADOW_WITHHELD,False,CANDIDATE_DOES_NOT_BEAT_BASELINE,1.0,0.0,1.0,0.34403309236012575,0.3423937254710438,m10-shadow-gate-v1,0.99,0.01,0.8
+logical_token_weighted_hit_rate,m10-shadow-v1,S0_RANDOM,S4_SESSION_AFFINITY,SHADOW_RECOMMENDED,False,,1.0,0.0,1.0,0.34403309236012575,0.3450661326619081,m10-shadow-gate-v1,0.99,0.01,0.8
+logical_block_ref_hit_rate,m10-shadow-v1,S0_RANDOM,S3_GB_PREFIX_BUCKET,SHADOW_RECOMMENDED,False,,1.0,0.0,1.0,0.3328862896842846,0.34013914538934326,m10-shadow-gate-v1,0.99,0.01,0.8
+logical_block_ref_hit_rate,m10-shadow-v1,S0_RANDOM,S5_FLEXLB_TTFT,SHADOW_WITHHELD,False,CANDIDATE_DOES_NOT_BEAT_BASELINE,1.0,0.0,1.0,0.3328862896842846,0.33129354400570654,m10-shadow-gate-v1,0.99,0.01,0.8
+logical_block_ref_hit_rate,m10-shadow-v1,S0_RANDOM,S4_SESSION_AFFINITY,SHADOW_RECOMMENDED,False,,1.0,0.0,1.0,0.3328862896842846,0.33390252005589266,m10-shadow-gate-v1,0.99,0.01,0.8
