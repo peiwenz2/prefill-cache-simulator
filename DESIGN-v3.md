@@ -935,12 +935,28 @@ M8 结论：single-threaded safety spike 已通过 Opus gate；epoch／grant／d
 
 ### M11｜Production implementation，另立 RFC／MR
 
-- [ ] selector 接入点单独拍板：Turbo／FlexLB master／LLMClientV1 SDK，不重复造全局 map。
-- [ ] Client 保留 request ledger／SLO／grant／continuation owner。
-- [ ] `off｜shadow｜enforce`，默认 off。
-- [ ] required mode 仅 test workspace，防 fallback 盖问题。
-- [ ] chain mock：timeout、stale view、P rollback、D reject、lease expiry、late frame、client crash。
-- [ ] canary 看 completed goodput／waste／fairness，不只看 hit。
+RFC 与 chain mock 部分（本仓库内可交付）：
+
+- [x] selector 接入点单独拍板：向已持有 map 的一方（FlexLB master／Turbo `CacheAwareScheduler`）投递带版本号的 scoring function，不重复造全局 map。owner 差异在 mock 中可执行：`owner=NONE` 拒绝非 off 模式，Turbo pull 无 push preference 通道；pull 派发循环本身未建模。见 `docs/m11-production-rfc.md` §2。
+- [x] Client 保留 request ledger／SLO／grant／continuation owner；WHERE 与 lifecycle 归属分离。`exclude_hosts` 只能来自本请求 failed-leg ledger；admission host 必须等于 owner 选中实例；admission 消耗 selection 与 prefill commit，sibling admission 被拒绝，decode reject 消耗本次 pending admission（同一决策不能重复 reject），因此每个 leg 都是 owner-mediated 且 attempt identity 唯一。见 RFC §3。
+- [x] output 去重只在 `OutputAuthority` fence：decode leg 只持 leg-local seq／identity；旧 epoch／重复／乱序 frame 分计数丢弃；lease 边界推进 epoch，过期 leg 的在飞 frame 被 fence 挡下；`max_rounds` 耗尽同样先推进 fence 再拒绝，过期 leg 不能继续投递；`report_checkpoint` 绑定 reporting leg——无 leg／superseded／sibling 的 report 直接拒绝，checkpoint 只携带 leg-local epoch＋seq。见 RFC §7.5、§7.6。
+- [x] crash 恢复只读持久状态：resume 位点 = durable output-ack，R2 checkpoint 只是 KV 材料；无 durable ack 则 fail closed。epoch 持久 source of truth 是 client durable ledger；controller 视图落后时 D2 fail-open 到 `REPORT_CHECKPOINT`，不抛异常。见 RFC §7.7、§10 Q5／Q6。
+- [x] `off｜shadow｜enforce`，默认 off；retry budget 耗尽后拒绝一切新 attempt，只允许一个 `ERROR` terminal。见 RFC §4、§5、`ChainConfig.mode`。
+- [x] required mode 仅 test workspace，防 fallback 盖问题；生产读到 `required` 直接拒绝启动，不静默降级；五类 fail-open reason（timeout／error／stale／capability／planner）一律**先计数、后硬失败**。见 RFC §4、§5、`RequiredModeRejected`。
+- [x] chain mock：timeout、stale view、P rollback、D reject、lease expiry、late frame、client crash 七场景，另有敌意用例（superseded-leg race、sibling admission 拒绝、leg-bound checkpoint、max_rounds fence、无 durable ack、epoch 回退 view、伪造 epoch、budget 耗尽）。见 `src/prefill_cache_sim/chain/scenarios.py`、`tests/test_chain_mocks.py`。
+- [x] fail-open 边界与 capability／version handshake 定义；未握手默认零 capability，不推断——未握手或缺 `PREFIX_CACHE_QUERY` 时 selection 的 hit 项按 0 计、退回 baseline 顺序且不发布 selector score；`served_quantum=0` 拒绝而非改写。见 RFC §5、§6、§7。
+- [x] canary 看 completed goodput／waste／fairness，不只看 hit。见 RFC §8、§9。
+
+Production 部分（本次不做，保持未完成）：
+
+- [ ] production MR：改 FlexLB master 或 Turbo 的实际 selector 代码。
+- [ ] LLMClientV1 侧 `LegRoute` 字段落地与 owner 团队接口对齐。
+- [ ] 真实硬件验证与 canary 执行（依赖 M9／M10）。
+- [ ] D2 开闸评估（RFC §9 R4 独立 gate，当前保持关闭）。
+
+交付：`docs/m11-production-rfc.md`＋`src/prefill_cache_sim/chain/`＋`tests/test_chain_mocks.py`。
+
+M11 结论：RFC 已就三件事拍板——selector 接入点、lifecycle 归属、上线形态；chain mock 把 RFC §7 的不变量做成可执行断言，覆盖 fail-open（五类 reason 全部计数、required 模式先计数后硬失败）、stale／epoch 回退 view 降级、rollback 不产生用户可见 output、lease expiry 不消耗 retry budget 且在边界推进 epoch fence（`max_rounds` 耗尽也先 fence 再拒绝，过期 leg 不能继续投递）、decode leg 只持 leg-local seq 而去重只在 fence（superseded-leg race 有测试，sibling admission 被拒绝，每个 leg attempt identity 唯一且 owner-mediated）、`report_checkpoint` 绑定 reporting leg（absent／superseded／sibling report 拒绝，checkpoint 携带 leg-local epoch＋seq）、cache-aware 打分依赖握手协商到 `PREFIX_CACHE_QUERY`（否则 hit 项按 0 计、退回 baseline 且不发布 score）、crash 恢复只读 durable output-ack（无 ack 则 fail closed）、controller epoch 视图落后时 D2 fail-open 而非抛异常。**这是跨组件协议／状态机测试，不是 production E2E**；全部数值标记 `TruthBasis.SYNTHETIC_FIXTURE`，不可作为测量值发布。D2 在 mock 中保持 gated：闸关闭或 `COOPERATIVE_PREEMPT` 未协商时只可能产出 `REPORT_CHECKPOINT`，`hard_abort()` 无条件抛异常。未覆盖项如实列在 RFC §11：attempt 边界模式切换未测试，Turbo pull 派发循环未建模，durable ack 介质与 D2 re-registration 是 open question。production MR、硬件验证、canary 均未开始。
 
 ---
 
