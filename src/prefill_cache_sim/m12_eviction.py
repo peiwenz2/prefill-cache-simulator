@@ -281,7 +281,7 @@ class M12EvictionPolicy(KernelPolicy):
         if now - self._last_census_refresh >= self.config.census_refresh_work:
             for node, resident in view.cache_by_node.items():
                 order = self._lru[node]
-                for key in resident:
+                for key in sorted(resident):
                     order.setdefault(key, None)
                     cohort = self._cohort(key)
                     self.census.observe(
@@ -338,7 +338,8 @@ class M12EvictionPolicy(KernelPolicy):
             )[:required]
         else:
             candidates = tuple(
-                self._candidate(key, node, view.now_work) for key in resident
+                self._candidate(key, node, view.now_work)
+                for key in sorted(resident)
             )
             try:
                 victims = choose_eviction_victims(candidates, required=required)
@@ -349,7 +350,7 @@ class M12EvictionPolicy(KernelPolicy):
         for key in victims:
             self._lru[node].pop(key, None)
             self.census.remove(key, self._cohort(key), node)
-        for key in additions:
+        for key in sorted(additions):
             self._lru[node][key] = None
             self.census.observe(
                 key,
