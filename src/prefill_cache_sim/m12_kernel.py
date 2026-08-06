@@ -10,6 +10,7 @@ import heapq
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from types import MappingProxyType
@@ -177,6 +178,72 @@ class CausalView:
             MappingProxyType(dict(self.queued_prefill_work)),
         )
 
+    @classmethod
+    def _from_kernel(
+        cls,
+        now_work: float,
+        completed_cache_keys: frozenset[str],
+        prefill_available_at: Mapping[str, float],
+        decode_available_at: Mapping[str, float],
+        cache_by_node: Mapping[str, frozenset[str]],
+        queued_prefill_work: Mapping[str, float],
+    ) -> CausalView:
+        """Build from kernel-owned immutable snapshots without copying them again."""
+        view = object.__new__(cls)
+        object.__setattr__(view, "now_work", now_work)
+        object.__setattr__(view, "completed_cache_keys", completed_cache_keys)
+        object.__setattr__(view, "prefill_available_at", prefill_available_at)
+        object.__setattr__(view, "decode_available_at", decode_available_at)
+        object.__setattr__(view, "cache_by_node", cache_by_node)
+        object.__setattr__(view, "queued_prefill_work", queued_prefill_work)
+        object.__setattr__(view, "retry_budget_remaining", 0)
+        return view
+
+
+class _CacheSnapshotStore:
+    """Versioned immutable views over kernel-owned mutable node caches."""
+
+    __slots__ = (
+        "_cache",
+        "_completed",
+        "_dirty_nodes",
+        "_mapping",
+        "_node_order",
+        "snapshot_entry_copies",
+        "union_entry_visits",
+    )
+
+    def __init__(self, cache: Mapping[str, set[str]]) -> None:
+        self._cache = cache
+        self._node_order = tuple(cache)
+        self._mapping: Mapping[str, frozenset[str]] | None = None
+        self._completed: frozenset[str] | None = None
+        self._dirty_nodes = set(cache)
+        self.snapshot_entry_copies = 0
+        self.union_entry_visits = 0
+
+    def invalidate(self, node: str) -> None:
+        self._dirty_nodes.add(node)
+        self._completed = None
+
+    def view(self) -> tuple[Mapping[str, frozenset[str]], frozenset[str]]:
+        if self._mapping is None or self._dirty_nodes:
+            frozen = dict(self._mapping or {})
+            for node in self._node_order:
+                if node not in self._dirty_nodes:
+                    continue
+                values = frozenset(self._cache[node])
+                self.snapshot_entry_copies += len(values)
+                frozen[node] = values
+            self._mapping = MappingProxyType(frozen)
+            self._dirty_nodes.clear()
+        if self._completed is None:
+            self.union_entry_visits += sum(
+                len(values) for values in self._mapping.values()
+            )
+            self._completed = frozenset().union(*self._mapping.values())
+        return self._mapping, self._completed
+
 
 @dataclass(frozen=True, slots=True)
 class CacheMutation:
@@ -339,6 +406,7 @@ class CausalKernel:
         cache: dict[str, set[str]] = {
             node: set() for node in self.config.prefill_node_ids
         }
+        cache_snapshots = _CacheSnapshotStore(cache)
         p_busy = {node: False for node in self.config.prefill_node_ids}
         p_waiting: dict[str, list[tuple[float, int, tuple[str, int]]]] = {
             node: [] for node in self.config.prefill_node_ids
@@ -346,6 +414,7 @@ class CausalKernel:
         queued_work = {node: 0.0 for node in self.config.prefill_node_ids}
         planned: dict[tuple[str, int], _Pending] = {}
         pending: dict[tuple[str, int], _Pending] = {}
+        attempt_keys: set[tuple[str, int]] = set()
         event_log: list[KernelEvent] = []
         queue: list[tuple[float, int, int, str, object]] = []
         serial = 0
@@ -371,11 +440,13 @@ class CausalKernel:
                 assert isinstance(arrival_request, KernelRequestSpec)
                 logical = arrival_request.logical
                 event_log.append(KernelEvent(at, kind, logical.logical_request_id))
-                view = self._view(at, cache, p_available, d_available, queued_work)
+                view = self._view(
+                    at, cache_snapshots, p_available, d_available, queued_work
+                )
                 plans = tuple(policy.plan_attempts(arrival_request, view))
                 if len(plans) > 1:
                     raise ValueError("initial policy may issue at most one attempt")
-                self._validate_plans(logical, plans, pending | planned)
+                self._validate_plans(logical, plans, attempt_keys)
                 for spec in plans:
                     admission_kind = policy.admission_event(arrival_request, spec)
                     if admission_kind is not None:
@@ -388,6 +459,7 @@ class CausalKernel:
                             )
                         )
                     key = (spec.logical_request_id, spec.attempt_index)
+                    attempt_keys.add(key)
                     planned[key] = _Pending(arrival_request, spec)
                     heapq.heappush(
                         queue,
@@ -458,7 +530,9 @@ class CausalKernel:
                         ),
                     )
                     serial += 1
-                view = self._view(at, cache, p_available, d_available, queued_work)
+                view = self._view(
+                    at, cache_snapshots, p_available, d_available, queued_work
+                )
                 policy_fence = policy.decode_not_before(item.request, spec, view)
                 if not _is_finite_number(policy_fence) or policy_fence < at:
                     raise ValueError("decode fence must be finite and causal")
@@ -522,7 +596,7 @@ class CausalKernel:
                 if item.decode_start is not None:
                     continue
                 live_view = self._view(
-                    at, cache, p_available, d_available, queued_work
+                    at, cache_snapshots, p_available, d_available, queued_work
                 )
                 policy_fence = policy.decode_not_before(
                     item.request, item.spec, live_view
@@ -590,7 +664,9 @@ class CausalKernel:
                 item = pending[lease_key]
                 event_log.append(KernelEvent(at, kind, lease_key[0], lease_key[1]))
                 lease_view = replace(
-                    self._view(at, cache, p_available, d_available, queued_work),
+                    self._view(
+                        at, cache_snapshots, p_available, d_available, queued_work
+                    ),
                     retry_budget_remaining=max(
                         0, self.config.retry_budget - item.spec.attempt_index
                     ),
@@ -662,10 +738,13 @@ class CausalKernel:
                 event_log.append(
                     KernelEvent(at, kind, completion_key[0], completion_key[1])
                 )
+                completion_view = self._view(
+                    at, cache_snapshots, p_available, d_available, queued_work
+                )
                 policy.attempt_finished(
                     item.request,
                     item.spec,
-                    self._view(at, cache, p_available, d_available, queued_work),
+                    completion_view,
                     actual_decode_work=(
                         item.spec.emitted_output_tokens
                         * self.config.cost_model.decode_work_per_token
@@ -674,27 +753,34 @@ class CausalKernel:
                 mutation = policy.cache_mutation(
                     item.request,
                     item.spec,
-                    self._view(at, cache, p_available, d_available, queued_work),
+                    completion_view,
                 )
                 if (
                     item.spec.terminal is AttemptTerminal.COMPLETED
                     or item.spec.prefill_reusable
-                ):
-                    self._apply_cache_mutation(item, mutation, cache)
+                ) and self._apply_cache_mutation(item, mutation, cache):
+                    cache_snapshots.invalidate(item.spec.p_node_id)
                 if item.spec.terminal is not AttemptTerminal.COMPLETED:
                     retry = policy.next_attempt(
                         item.request,
                         item.spec,
-                        self._view(at, cache, p_available, d_available, queued_work),
+                            self._view(
+                                at,
+                                cache_snapshots,
+                                p_available,
+                                d_available,
+                                queued_work,
+                            ),
                     )
                     used_retries = item.spec.attempt_index
                     if retry is not None:
                         if used_retries >= self.config.retry_budget:
                             raise ValueError("retry budget exhausted")
                         self._validate_plans(
-                            item.request.logical, (retry,), pending | planned
+                            item.request.logical, (retry,), attempt_keys
                         )
                         retry_key = (retry.logical_request_id, retry.attempt_index)
+                        attempt_keys.add(retry_key)
                         admission_kind = policy.admission_event(item.request, retry)
                         if admission_kind is not None:
                             event_log.append(
@@ -734,7 +820,7 @@ class CausalKernel:
             executed,
             metrics,
             tuple(event_log),
-            frozenset().union(*cache.values()),
+            cache_snapshots.view()[1],
         )
 
     def _materialize(self, item: _Pending) -> ExecutedAttempt:
@@ -823,7 +909,7 @@ class CausalKernel:
         self,
         logical: LogicalRequestSpec,
         plans: tuple[AttemptExecutionSpec, ...],
-        pending: Mapping[tuple[str, int], _Pending],
+        attempt_keys: AbstractSet[tuple[str, int]],
     ) -> None:
         previous = -1
         seen: set[int] = set()
@@ -832,7 +918,7 @@ class CausalKernel:
                 raise ValueError("attempt references unknown logical workload")
             if (
                 spec.attempt_index in seen
-                or (spec.logical_request_id, spec.attempt_index) in pending
+                or (spec.logical_request_id, spec.attempt_index) in attempt_keys
             ):
                 raise ValueError("duplicate attempt identity")
             if spec.attempt_index <= previous:
@@ -848,9 +934,6 @@ class CausalKernel:
 
     def _price_prefill(self, item: _Pending, cache: Mapping[str, set[str]]) -> None:
         local = cache[item.spec.p_node_id]
-        remote_available = set().union(
-            *(values for node, values in cache.items() if node != item.spec.p_node_id)
-        )
         remote_claim = set(item.spec.remote_cache_keys)
         remote_tokens = 0
         covered_tokens = 0
@@ -861,7 +944,11 @@ class CausalKernel:
         ):
             if key in local:
                 covered_tokens += tokens
-            elif key in remote_claim and key in remote_available:
+            elif key in remote_claim and any(
+                key in values
+                for node, values in cache.items()
+                if node != item.spec.p_node_id
+            ):
                 covered_tokens += tokens
                 remote_tokens += tokens
             else:
@@ -872,17 +959,21 @@ class CausalKernel:
         item.kvs_work = remote_tokens * model.kvs_work_per_token
         item.kvs_bytes = remote_tokens * model.kvs_bytes_per_token
 
-    def _apply_cache_mutation(self, item, mutation, cache) -> None:
+    def _apply_cache_mutation(self, item, mutation, cache) -> bool:
         node_cache = cache[item.spec.p_node_id]
         victims = set(mutation.evict_keys)
         if not victims <= node_cache:
             raise ValueError("eviction references non-resident cache key")
         node_cache.difference_update(victims)
+        changed = bool(victims)
         if mutation.admit:
             additions = set(item.request.prefix_cache_keys)
-            if len(node_cache | additions) > self.config.cache_capacity_entries:
+            missing = additions - node_cache
+            if len(node_cache) + len(missing) > self.config.cache_capacity_entries:
                 raise ValueError("cache admission exceeds bounded capacity")
-            node_cache.update(additions)
+            node_cache.update(missing)
+            changed = changed or bool(missing)
+        return changed
 
     @staticmethod
     def _freeze_request(
@@ -905,16 +996,17 @@ class CausalKernel:
         )
 
     @staticmethod
-    def _view(now, cache, p_available, d_available, queued_work) -> CausalView:
-        frozen = {node: frozenset(values) for node, values in cache.items()}
-        visible_queue = dict(queued_work)
-        return CausalView(
+    def _view(
+        now, cache_snapshots, p_available, d_available, queued_work
+    ) -> CausalView:
+        frozen, completed = cache_snapshots.view()
+        return CausalView._from_kernel(
             now,
-            frozenset().union(*frozen.values()),
-            p_available,
-            d_available,
+            completed,
+            MappingProxyType(dict(p_available)),
+            MappingProxyType(dict(d_available)),
             frozen,
-            visible_queue,
+            MappingProxyType(dict(queued_work)),
         )
 
 

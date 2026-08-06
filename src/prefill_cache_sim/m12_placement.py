@@ -243,7 +243,11 @@ class M12PlacementPolicy(KernelPolicy):
         self._family_node: dict[str, str] = {}
         self._block_counts: Counter[str] = Counter()
         self._next_family = 0
-        self.session_families: tuple[str, ...] = ()
+        self._session_families: list[str] = []
+
+    @property
+    def session_families(self) -> tuple[str, ...]:
+        return tuple(self._session_families)
 
     def plan_attempts(
         self, request: KernelRequestSpec, view: CausalView
@@ -513,14 +517,15 @@ class M12PlacementPolicy(KernelPolicy):
             else "default"
         )
         count_keys = request.prefix_cache_keys[: len(raw_blocks)]
+        hot_prefix = [True]
+        for block in count_keys:
+            hot_prefix.append(hot_prefix[-1] and self._block_counts[block] >= 8)
         family: str | None = None
         if len(raw_blocks) >= 2:
             for depth in range(len(raw_blocks), 1, -1):
                 prefix = (cohort, *raw_blocks[:depth])
                 candidate = self._prefix_to_family.get(prefix)
-                hot_only = all(
-                    self._block_counts[block] >= 8 for block in count_keys[:depth]
-                )
+                hot_only = hot_prefix[min(depth, len(count_keys))]
                 if (
                     candidate is not None
                     and self._family_sizes[candidate] < 64
@@ -538,7 +543,7 @@ class M12PlacementPolicy(KernelPolicy):
             if current is None or self._family_sizes[current] >= 64:
                 self._prefix_to_family[prefix] = family
         self._block_counts.update(count_keys)
-        self.session_families = (*self.session_families, family)
+        self._session_families.append(family)
         return family
 
 

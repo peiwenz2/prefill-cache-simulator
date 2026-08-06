@@ -452,6 +452,7 @@ def test_s4_cohort_identity_is_safe_for_adversarial_nul_fields() -> None:
     )
     CausalKernel(config()).run(workload, policy)
     assert policy.session_families == ("family:0", "family:1")
+    assert isinstance(policy._session_families, list)
 
 
 def test_slo_slack_applies_to_full_marginal_cost_not_queue_only() -> None:
@@ -560,6 +561,29 @@ def test_s4_common_system_block_does_not_link_unrelated_requests() -> None:
     )
     CausalKernel(config()).run(workload, policy)
     assert policy.session_families == ("family:0", "family:1")
+
+
+def test_s4_hot_prefix_handles_raw_truth_longer_than_count_keys() -> None:
+    workload = build_kernel_requests(
+        [trace_row("short", arrival=0, tenant="t", tier="STANDARD")]
+    )
+    policy = M12PlacementPolicy(
+        PlacementMode.S4,
+        config().cost_model,
+        kvs_enabled=False,
+        request_truth={
+            "short": CohortTruth(
+                "model-a",
+                "adapter-a",
+                "shape-a",
+                100,
+                frozenset({"p0", "p1"}),
+                ("RAW-0", "RAW-1", "RAW-2"),
+            )
+        },
+    )
+
+    assert policy._causal_session_family(workload[0]) == "family:0"
 
 
 def test_decode_binding_requires_executed_ledger_proof() -> None:

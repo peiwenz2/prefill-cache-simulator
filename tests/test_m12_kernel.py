@@ -13,6 +13,7 @@ from prefill_cache_sim.m12_kernel import (
     KernelConfig,
     KernelPolicy,
     KernelRequestSpec,
+    _CacheSnapshotStore,
 )
 from prefill_cache_sim.m12_metrics import LogicalRequestSpec
 
@@ -124,6 +125,83 @@ def kernel(
 
 def cached_request(logical: LogicalRequestSpec, key: str) -> KernelRequestSpec:
     return KernelRequestSpec(logical, (key,), (logical.input_tokens,))
+
+
+def test_cache_snapshot_store_reuses_work_until_mutation() -> None:
+    cache = {"p0": {"A"}, "p1": {"B"}}
+    snapshots = _CacheSnapshotStore(cache)
+
+    first_mapping, first_union = snapshots.view()
+    second_mapping, second_union = snapshots.view()
+    assert first_mapping is second_mapping
+    assert first_union is second_union
+    assert snapshots.snapshot_entry_copies == 2
+    assert snapshots.union_entry_visits == 2
+
+    cache["p0"].add("C")
+    snapshots.invalidate("p0")
+    third_mapping, third_union = snapshots.view()
+    assert third_mapping is not first_mapping
+    assert third_mapping["p0"] == frozenset({"A", "C"})
+    assert first_mapping["p0"] == frozenset({"A"})
+    assert third_union == frozenset({"A", "B", "C"})
+    assert snapshots.snapshot_entry_copies == 4
+    assert snapshots.union_entry_visits == 5
+
+
+def test_cache_snapshot_store_preserves_kernel_node_order() -> None:
+    cache = {"node-z": {"Z"}, "node-a": {"A"}, "node-m": {"M"}}
+    snapshots = _CacheSnapshotStore(cache)
+
+    first_mapping, _ = snapshots.view()
+    assert tuple(first_mapping) == ("node-z", "node-a", "node-m")
+
+    cache["node-a"].add("A2")
+    cache["node-z"].add("Z2")
+    snapshots.invalidate("node-a")
+    snapshots.invalidate("node-z")
+    second_mapping, _ = snapshots.view()
+    assert tuple(second_mapping) == ("node-z", "node-a", "node-m")
+
+
+def test_cache_snapshot_work_scales_with_mutations_not_view_reads() -> None:
+    cache = {"p0": set(), "p1": set()}
+    snapshots = _CacheSnapshotStore(cache)
+    snapshots.view()
+    for index in range(64):
+        for _ in range(8):
+            snapshots.view()
+        node = f"p{index % 2}"
+        cache[node].add(f"K{index}")
+        snapshots.invalidate(node)
+        snapshots.view()
+
+    assert snapshots.snapshot_entry_copies == 2 * sum(range(1, 33))
+    assert snapshots.union_entry_visits == sum(range(65))
+
+
+def test_completion_callbacks_share_one_immutable_pre_mutation_view() -> None:
+    class ViewIdentityPolicy(RecordingPolicy):
+        def __init__(self) -> None:
+            super().__init__({"r": (attempt("r"),)})
+            self.finished_view = None
+            self.mutation_view = None
+
+        def attempt_finished(
+            self, request, attempt, view, *, actual_decode_work
+        ) -> None:
+            self.finished_view = view
+
+        def cache_mutation(self, request, attempt, view):
+            self.mutation_view = view
+            return CacheMutation(admit=True)
+
+    policy = ViewIdentityPolicy()
+    result = kernel().run([cached_request(request("r"), "K")], policy)
+
+    assert policy.finished_view is policy.mutation_view
+    assert policy.finished_view.completed_cache_keys == frozenset()
+    assert result.completed_cache_keys == frozenset({"K"})
 
 
 def test_workload_and_attempt_specs_are_frozen_and_independent() -> None:
