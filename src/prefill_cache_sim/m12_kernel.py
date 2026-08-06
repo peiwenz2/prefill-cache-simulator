@@ -10,7 +10,7 @@ import heapq
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from types import MappingProxyType
 
@@ -155,6 +155,7 @@ class CausalView:
     # Ready but not started, conservative P-only work. In-flight reservation is
     # represented separately by ``prefill_available_at``; KVS is priced at P-start.
     queued_prefill_work: Mapping[str, float]
+    retry_budget_remaining: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -210,6 +211,61 @@ class KernelPolicy(ABC):
         """Optionally issue one retry after a failed/aborted physical completion."""
         return None
 
+    def decode_not_before(
+        self,
+        request: KernelRequestSpec,
+        attempt: AttemptExecutionSpec,
+        view: CausalView,
+    ) -> float:
+        """Return an idempotent D-start fence; it may be re-read after wake-up."""
+        return view.now_work
+
+    def admission_event(
+        self, request: KernelRequestSpec, attempt: AttemptExecutionSpec
+    ) -> str | None:
+        """Optionally expose a policy admission lifecycle marker."""
+        return None
+
+    def reprice_decode(
+        self,
+        request: KernelRequestSpec,
+        attempt: AttemptExecutionSpec,
+        view: CausalView,
+    ) -> AttemptExecutionSpec:
+        """Reprice only at the decode/lease boundary."""
+        return attempt
+
+    def decode_lease_tokens(
+        self,
+        request: KernelRequestSpec,
+        attempt: AttemptExecutionSpec,
+        view: CausalView,
+    ) -> int | None:
+        """Return a positive boundary strictly before full output, or no lease."""
+        return None
+
+    def decode_started(
+        self,
+        request: KernelRequestSpec,
+        attempt: AttemptExecutionSpec,
+        view: CausalView,
+        *,
+        finish_work: float,
+    ) -> None:
+        """Publish kernel-owned actual D residency to the policy."""
+        return None
+
+    def attempt_finished(
+        self,
+        request: KernelRequestSpec,
+        attempt: AttemptExecutionSpec,
+        view: CausalView,
+        *,
+        actual_decode_work: float,
+    ) -> None:
+        """Settle policy reservations against kernel-owned execution truth."""
+        return None
+
 
 @dataclass(frozen=True, slots=True)
 class KernelEvent:
@@ -247,16 +303,19 @@ class _Pending:
     prefill_work: float = 0
     kvs_work: float = 0
     kvs_bytes: int = 0
+    decode_start: float | None = None
 
 
 class CausalKernel:
     """Deterministic event heap with completion-before-arrival tie semantics."""
 
     _COMPLETION = 0
-    _PREFILL_FINISH = 1
-    _ATTEMPT_READY = 2
-    _PREFILL_START = 3
-    _ARRIVAL = 4
+    _LEASE_BOUNDARY = 1
+    _PREFILL_FINISH = 2
+    _DECODE_START = 3
+    _ATTEMPT_READY = 4
+    _PREFILL_START = 5
+    _ARRIVAL = 6
 
     def __init__(self, config: KernelConfig) -> None:
         self.config = config
@@ -318,6 +377,16 @@ class CausalKernel:
                     raise ValueError("initial policy may issue at most one attempt")
                 self._validate_plans(logical, plans, pending | planned)
                 for spec in plans:
+                    admission_kind = policy.admission_event(arrival_request, spec)
+                    if admission_kind is not None:
+                        event_log.append(
+                            KernelEvent(
+                                at,
+                                admission_kind,
+                                spec.logical_request_id,
+                                spec.attempt_index,
+                            )
+                        )
                     key = (spec.logical_request_id, spec.attempt_index)
                     planned[key] = _Pending(arrival_request, spec)
                     heapq.heappush(
@@ -389,18 +458,202 @@ class CausalKernel:
                         ),
                     )
                     serial += 1
-                d_start = max(at, d_available[spec.d_node_id])
+                view = self._view(at, cache, p_available, d_available, queued_work)
+                policy_fence = policy.decode_not_before(item.request, spec, view)
+                if not _is_finite_number(policy_fence) or policy_fence < at:
+                    raise ValueError("decode fence must be finite and causal")
+                d_start = max(at, d_available[spec.d_node_id], policy_fence)
+                if d_start > at:
+                    event_log.append(
+                        KernelEvent(
+                            at,
+                            "DECODE_GATED",
+                            spec.logical_request_id,
+                            spec.attempt_index,
+                        )
+                    )
+                    heapq.heappush(
+                        queue,
+                        (
+                            d_start,
+                            self._DECODE_START,
+                            serial,
+                            "DECODE_START",
+                            prefill_key,
+                        ),
+                    )
+                else:
+                    finish = (
+                        at
+                        + spec.emitted_output_tokens
+                        * self.config.cost_model.decode_work_per_token
+                    )
+                    d_available[spec.d_node_id] = finish
+                    item.decode_start = at
+                    item.finish = finish
+                    policy.decode_started(
+                        item.request, spec, view, finish_work=finish
+                    )
+                    lease_tokens = policy.decode_lease_tokens(
+                        item.request, spec, view
+                    )
+                    event_at = finish
+                    event_priority = self._COMPLETION
+                    event_kind = "COMPLETION"
+                    if lease_tokens is not None:
+                        if not 0 < lease_tokens < spec.emitted_output_tokens:
+                            raise ValueError("lease must precede fully emitted output")
+                        event_at = (
+                            at
+                            + lease_tokens
+                            * self.config.cost_model.decode_work_per_token
+                        )
+                        event_priority = self._LEASE_BOUNDARY
+                        event_kind = "LEASE_BOUNDARY"
+                    heapq.heappush(
+                        queue,
+                        (event_at, event_priority, serial, event_kind, prefill_key),
+                    )
+                serial += 1
+            elif priority == self._DECODE_START:
+                decode_key = payload
+                assert isinstance(decode_key, tuple)
+                item = pending[decode_key]
+                if item.decode_start is not None:
+                    continue
+                live_view = self._view(
+                    at, cache, p_available, d_available, queued_work
+                )
+                policy_fence = policy.decode_not_before(
+                    item.request, item.spec, live_view
+                )
+                if not _is_finite_number(policy_fence):
+                    raise ValueError("decode fence must be finite")
+                next_start = max(
+                    at, d_available[item.spec.d_node_id], policy_fence
+                )
+                if next_start > at:
+                    heapq.heappush(
+                        queue,
+                        (
+                            next_start,
+                            self._DECODE_START,
+                            serial,
+                            "DECODE_START",
+                            decode_key,
+                        ),
+                    )
+                    serial += 1
+                    continue
+                event_log.append(KernelEvent(at, kind, decode_key[0], decode_key[1]))
+                lease_view = replace(
+                    live_view,
+                    retry_budget_remaining=max(
+                        0, self.config.retry_budget - item.spec.attempt_index
+                    ),
+                )
                 finish = (
-                    d_start
-                    + spec.emitted_output_tokens
+                    at
+                    + item.spec.emitted_output_tokens
                     * self.config.cost_model.decode_work_per_token
                 )
-                d_available[spec.d_node_id] = finish
+                d_available[item.spec.d_node_id] = finish
+                item.decode_start = at
                 item.finish = finish
+                policy.decode_started(
+                    item.request, item.spec, lease_view, finish_work=finish
+                )
+                lease_tokens = policy.decode_lease_tokens(
+                    item.request, item.spec, lease_view
+                )
+                event_at = finish
+                event_priority = self._COMPLETION
+                event_kind = "COMPLETION"
+                if lease_tokens is not None:
+                    if not 0 < lease_tokens < item.spec.emitted_output_tokens:
+                        raise ValueError("lease must precede fully emitted output")
+                    event_at = (
+                        at
+                        + lease_tokens
+                        * self.config.cost_model.decode_work_per_token
+                    )
+                    event_priority = self._LEASE_BOUNDARY
+                    event_kind = "LEASE_BOUNDARY"
                 heapq.heappush(
                     queue,
-                    (finish, self._COMPLETION, serial, "COMPLETION", prefill_key),
+                    (event_at, event_priority, serial, event_kind, decode_key),
                 )
+                serial += 1
+            elif priority == self._LEASE_BOUNDARY:
+                lease_key = payload
+                assert isinstance(lease_key, tuple)
+                item = pending[lease_key]
+                event_log.append(KernelEvent(at, kind, lease_key[0], lease_key[1]))
+                lease_view = replace(
+                    self._view(at, cache, p_available, d_available, queued_work),
+                    retry_budget_remaining=max(
+                        0, self.config.retry_budget - item.spec.attempt_index
+                    ),
+                )
+                revised = policy.reprice_decode(item.request, item.spec, lease_view)
+                if revised.terminal is AttemptTerminal.ABORTED:
+                    if item.decode_start is None:
+                        raise ValueError("lease boundary is missing D start truth")
+                    emitted = _exact_elapsed_tokens(
+                        at - item.decode_start,
+                        self.config.cost_model.decode_work_per_token,
+                    )
+                    if emitted <= 0 or emitted >= item.spec.emitted_output_tokens:
+                        raise ValueError("abort must follow partial lease progress")
+                    item.spec = replace(revised, emitted_output_tokens=emitted)
+                    item.finish = at
+                    d_available[item.spec.d_node_id] = at
+                    waiting_keys = sorted(
+                        {
+                            queued_payload
+                            for (
+                                queued_at,
+                                queued_priority,
+                                _,
+                                _,
+                                queued_payload,
+                            ) in queue
+                            if queued_priority == self._DECODE_START
+                            and queued_at > at
+                            and isinstance(queued_payload, tuple)
+                            and pending[queued_payload].spec.d_node_id
+                            == item.spec.d_node_id
+                            and pending[queued_payload].decode_start is None
+                        }
+                    )
+                    for waiting_key in waiting_keys:
+                        heapq.heappush(
+                            queue,
+                            (
+                                at,
+                                self._DECODE_START,
+                                serial,
+                                "DECODE_START",
+                                waiting_key,
+                            ),
+                        )
+                        serial += 1
+                    heapq.heappush(
+                        queue,
+                        (at, self._COMPLETION, serial, "COMPLETION", lease_key),
+                    )
+                else:
+                    assert item.finish is not None
+                    heapq.heappush(
+                        queue,
+                        (
+                            item.finish,
+                            self._COMPLETION,
+                            serial,
+                            "COMPLETION",
+                            lease_key,
+                        ),
+                    )
                 serial += 1
             else:
                 completion_key = payload
@@ -408,6 +661,15 @@ class CausalKernel:
                 item = pending[completion_key]
                 event_log.append(
                     KernelEvent(at, kind, completion_key[0], completion_key[1])
+                )
+                policy.attempt_finished(
+                    item.request,
+                    item.spec,
+                    self._view(at, cache, p_available, d_available, queued_work),
+                    actual_decode_work=(
+                        item.spec.emitted_output_tokens
+                        * self.config.cost_model.decode_work_per_token
+                    ),
                 )
                 mutation = policy.cache_mutation(
                     item.request,
@@ -433,6 +695,16 @@ class CausalKernel:
                             item.request.logical, (retry,), pending | planned
                         )
                         retry_key = (retry.logical_request_id, retry.attempt_index)
+                        admission_kind = policy.admission_event(item.request, retry)
+                        if admission_kind is not None:
+                            event_log.append(
+                                KernelEvent(
+                                    at,
+                                    admission_kind,
+                                    retry.logical_request_id,
+                                    retry.attempt_index,
+                                )
+                            )
                         planned[retry_key] = _Pending(item.request, retry)
                         heapq.heappush(
                             queue,
@@ -648,6 +920,15 @@ class CausalKernel:
 
 def _is_plain_int(value: object) -> bool:
     return type(value) is int
+
+
+def _exact_elapsed_tokens(work: float, work_per_token: float) -> int:
+    if work_per_token <= 0:
+        raise ValueError("lease boundary requires positive decode cost")
+    tokens = round(work / work_per_token)
+    if not math.isclose(tokens * work_per_token, work):
+        raise ValueError("lease boundary is not token aligned")
+    return tokens
 
 
 def _is_finite_number(value: object) -> bool:

@@ -56,6 +56,16 @@ class RecordingPolicy(KernelPolicy):
         )
 
 
+class DecodeGatePolicy(RecordingPolicy):
+    def decode_not_before(self, request, attempt, view):
+        return 7
+
+
+class SameFutureGatePolicy(RecordingPolicy):
+    def decode_not_before(self, request, attempt, view):
+        return 5
+
+
 def attempt(
     logical: str,
     index: int = 0,
@@ -144,6 +154,39 @@ def test_completion_is_materialized_before_same_time_arrival() -> None:
         "COMPLETION",
         "ARRIVAL",
     ]
+
+
+def test_decode_gate_hook_delays_only_d_start_and_emits_lifecycle_event() -> None:
+    policy = DecodeGatePolicy({"r": (attempt("r"),)})
+    result = kernel().run([request("r")], policy)
+    outcome = result.attempts[0].outcome
+    assert result.attempts[0].prefill_finish_work == 1
+    assert outcome.finish_work == 8
+    assert [(event.kind, event.at_work) for event in result.events] == [
+        ("ARRIVAL", 0),
+        ("DECODE_GATED", 1),
+        ("DECODE_START", 7),
+        ("COMPLETION", 8),
+    ]
+
+
+def test_three_future_gated_attempts_on_one_d_node_never_overlap() -> None:
+    plans = {
+        identity: (attempt(identity, arrival=0, emitted=2, d_node="d0"),)
+        for identity in ("a", "b", "c")
+    }
+    result = kernel().run(
+        [
+            cached_request(request(identity, arrival=0), "shared")
+            for identity in ("a", "b", "c")
+        ],
+        SameFutureGatePolicy(plans),
+    )
+    starts = [
+        event.at_work for event in result.events if event.kind == "DECODE_START"
+    ]
+    assert starts == [5, 6, 7]
+    assert [attempt.outcome.finish_work for attempt in result.attempts] == [6, 7, 8]
 
 
 def test_future_completion_is_not_visible_and_placement_occurs_only_then() -> None:
