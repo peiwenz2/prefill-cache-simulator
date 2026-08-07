@@ -148,15 +148,19 @@ class DecodeCreditLedger:
     """Shared temporal D-capacity reservations and P→D debt."""
 
     def __init__(self, capacity_credits: float) -> None:
+        if capacity_credits < 0 or not math.isfinite(capacity_credits):
+            raise ValueError("capacity credits must be finite and non-negative")
         self.capacity_credits = capacity_credits
-        self._active: dict[tuple[str, int], DecodeReservation] = {}
+        self._active: dict[tuple[str, int], tuple[DecodeReservation, ...]] = {}
+        self._executing: dict[tuple[str, int], DecodeReservation] = {}
+        self._reserved_totals: dict[tuple[str, int], float] = {}
         self.actual_decode_work = 0.0
         self.reconciled_credit_error = 0.0
         self.peak_reserved_decode_credits = 0.0
 
     @property
     def reserved_decode_credits(self) -> float:
-        return sum(item.credits for item in self._active.values())
+        return sum(self._reserved_totals.values())
 
     @property
     def p_to_d_debt_credits(self) -> float:
@@ -164,10 +168,20 @@ class DecodeCreditLedger:
 
     @property
     def decode_residency(self) -> Mapping[str, float]:
-        return {
-            item.logical_request_id: item.releases_at_work
-            for item in self._active.values()
-        }
+        residency: dict[str, float] = {}
+        for item in self._temporal_reservations():
+            residency[item.logical_request_id] = max(
+                residency.get(item.logical_request_id, -math.inf),
+                item.releases_at_work,
+            )
+        return residency
+
+    def _temporal_reservations(self) -> tuple[DecodeReservation, ...]:
+        return tuple(
+            item
+            for reservations in self._active.values()
+            for item in reservations
+        ) + tuple(self._executing.values())
 
     def reserve(
         self,
@@ -177,29 +191,59 @@ class DecodeCreditLedger:
         *,
         now_work: float,
     ) -> DecodeReservation:
-        if credits > self.capacity_credits:
-            raise ValueError("one decode reservation exceeds shared capacity")
+        self._validate_request(credits, now_work)
         key = (logical_request_id, attempt_index)
-        if key in self._active:
+        if key in self._active or key in self._executing:
             raise ValueError("duplicate decode reservation")
-        starts = self.available_at(credits, now_work=now_work)
-        occupied = sum(
-            item.credits
-            for item in self._active.values()
-            if item.starts_at_work <= starts < item.releases_at_work
-        )
-        self.peak_reserved_decode_credits = max(
-            self.peak_reserved_decode_credits, occupied + credits
-        )
-        reservation = DecodeReservation(
-            logical_request_id,
-            attempt_index,
-            credits,
-            starts,
-            starts + max(credits, 1e-9),
-        )
-        self._active[key] = reservation
-        return reservation
+        if credits > 0 and self.capacity_credits == 0:
+            raise ValueError("positive decode reservation requires positive capacity")
+        remaining = credits
+        cursor = now_work
+        chunks: list[DecodeReservation] = []
+        while remaining > 0:
+            chunk_credits = min(remaining, self.capacity_credits)
+            starts = self.available_at(chunk_credits, now_work=cursor)
+            releases = starts + max(chunk_credits, 1e-9)
+            existing = self._temporal_reservations() + tuple(chunks)
+            breakpoints = (starts,) + tuple(
+                item.starts_at_work
+                for item in existing
+                if starts < item.starts_at_work < releases
+            )
+            occupied = max(
+                sum(
+                    item.credits
+                    for item in existing
+                    if item.starts_at_work <= point < item.releases_at_work
+                )
+                for point in breakpoints
+            )
+            self.peak_reserved_decode_credits = max(
+                self.peak_reserved_decode_credits, occupied + chunk_credits
+            )
+            reservation = DecodeReservation(
+                logical_request_id,
+                attempt_index,
+                chunk_credits,
+                starts,
+                releases,
+            )
+            chunks.append(reservation)
+            remaining -= chunk_credits
+            cursor = reservation.releases_at_work
+        if not chunks:
+            chunks.append(
+                DecodeReservation(
+                    logical_request_id,
+                    attempt_index,
+                    0.0,
+                    now_work,
+                    now_work + 1e-9,
+                )
+            )
+        self._active[key] = tuple(chunks)
+        self._reserved_totals[key] = credits
+        return chunks[0]
 
     def available_at(
         self,
@@ -208,28 +252,56 @@ class DecodeCreditLedger:
         now_work: float,
         exclude: tuple[str, int] | None = None,
     ) -> float:
-        if credits > self.capacity_credits:
-            raise ValueError("one decode reservation exceeds shared capacity")
-        endpoints = sorted(
-            {
-                item.releases_at_work
-                for key, item in self._active.items()
-                if key != exclude
-                if item.releases_at_work > now_work
-            }
+        self._validate_request(credits, now_work)
+        if credits > 0 and self.capacity_credits == 0:
+            raise ValueError("positive decode reservation requires positive capacity")
+        width = min(credits, self.capacity_credits)
+        existing = tuple(
+            item
+            for key, reservations in self._active.items()
+            if key != exclude
+            for item in reservations
+        ) + tuple(
+            item
+            for key, item in self._executing.items()
+            if key != exclude
         )
-        starts = now_work
-        for candidate in (now_work, *endpoints):
-            occupied = sum(
-                item.credits
-                for key, item in self._active.items()
-                if key != exclude
-                if item.starts_at_work <= candidate < item.releases_at_work
+        candidates = (now_work,) + tuple(
+            sorted(
+                {
+                    item.releases_at_work
+                    for item in existing
+                    if item.releases_at_work > now_work
+                }
             )
-            if occupied + credits <= self.capacity_credits:
-                starts = candidate
-                break
-        return starts
+        )
+        duration = max(width, 1e-9)
+        for candidate in candidates:
+            releases = candidate + duration
+            breakpoints = (candidate,) + tuple(
+                item.starts_at_work
+                for item in existing
+                if candidate < item.starts_at_work < releases
+            )
+            if all(
+                sum(
+                    item.credits
+                    for item in existing
+                    if item.starts_at_work <= point < item.releases_at_work
+                )
+                + width
+                <= self.capacity_credits
+                for point in breakpoints
+            ):
+                return candidate
+        raise AssertionError("finite reservations must eventually release")
+
+    @staticmethod
+    def _validate_request(credits: float, now_work: float) -> None:
+        if credits < 0 or not math.isfinite(credits):
+            raise ValueError("decode credits must be finite and non-negative")
+        if not math.isfinite(now_work):
+            raise ValueError("reservation time must be finite")
 
     def activate(
         self,
@@ -240,19 +312,63 @@ class DecodeCreditLedger:
         starts_at_work: float,
         finishes_at_work: float,
     ) -> None:
+        self._validate_request(credits, starts_at_work)
+        if not math.isfinite(finishes_at_work) or finishes_at_work < starts_at_work:
+            raise ValueError("decode finish must be finite and not precede start")
         key = (logical_request_id, attempt_index)
+        if key in self._executing:
+            raise ValueError("duplicate decode activation")
+        execution = DecodeReservation(
+            logical_request_id,
+            attempt_index,
+            min(credits, self.capacity_credits),
+            starts_at_work,
+            finishes_at_work,
+        )
+        executing = tuple(self._executing.values())
+        breakpoints = (starts_at_work,) + tuple(
+            item.starts_at_work
+            for item in executing
+            if starts_at_work < item.starts_at_work < finishes_at_work
+        )
+        occupied = max(
+            sum(
+                item.credits
+                for item in executing
+                if item.starts_at_work <= point < item.releases_at_work
+            )
+            for point in breakpoints
+        )
+        if occupied + execution.credits > self.capacity_credits:
+            raise ValueError("decode activation exceeds shared capacity")
+
         current = self._active.get(key)
         if current is None:
-            current = self.reserve(
+            self.reserve(
                 logical_request_id,
                 attempt_index,
                 credits,
                 now_work=starts_at_work,
             )
-        self._active[key] = replace(
-            current,
-            starts_at_work=starts_at_work,
-            releases_at_work=finishes_at_work,
+        self._active.pop(key)
+        invalidated = tuple(
+            other_key
+            for other_key, reservations in self._active.items()
+            if any(
+                item.starts_at_work < finishes_at_work
+                and starts_at_work < item.releases_at_work
+                for item in reservations
+            )
+        )
+        for other_key in invalidated:
+            # Keep its full debt in _reserved_totals.  The kernel rechecks the
+            # causal fence before Decode starts; activate() will then rebuild a
+            # non-overlapping temporal reservation at the delayed start.
+            self._active.pop(other_key)
+        self._executing[key] = execution
+        self.peak_reserved_decode_credits = max(
+            self.peak_reserved_decode_credits,
+            occupied + execution.credits,
         )
 
     def settle(
@@ -262,9 +378,18 @@ class DecodeCreditLedger:
         *,
         actual_decode_work: float,
     ) -> None:
-        reservation = self._active.pop((logical_request_id, attempt_index))
+        key = (logical_request_id, attempt_index)
+        reservations = self._active.pop(key, ())
+        execution = self._executing.pop(key, None)
+        if not reservations and execution is None:
+            raise KeyError(key)
+        reserved_total = self._reserved_totals.pop(
+            key,
+            sum(item.credits for item in reservations)
+            + (execution.credits if execution is not None else 0.0),
+        )
         self.actual_decode_work += actual_decode_work
-        self.reconciled_credit_error += actual_decode_work - reservation.credits
+        self.reconciled_credit_error += actual_decode_work - reserved_total
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 
 import pytest
@@ -10,6 +11,7 @@ from prefill_cache_sim.m12_decode import (
     DecodeAdmissionConfig,
     DecodeAdmissionMode,
     DecodeCapacityPolicy,
+    DecodeCreditLedger,
     DecodeRunReport,
     PrefixFamilyPredictor,
     evaluate_g12_3,
@@ -124,6 +126,131 @@ def test_credit_ledger_accumulates_conserves_and_reconciles_actual() -> None:
     assert second.arrival_work > 0
     assert policy.ledger.reserved_decode_credits == 4
     assert policy.ledger.peak_reserved_decode_credits <= 2
+
+
+def test_oversized_reservation_is_serialized_without_hiding_predicted_work() -> None:
+    ledger = DecodeCreditLedger(capacity_credits=4)
+
+    first = ledger.reserve("large", 0, 10, now_work=0)
+    chunks = ledger._active[("large", 0)]
+    second = ledger.reserve("small", 0, 1, now_work=0)
+
+    assert first.starts_at_work == 0
+    assert [item.credits for item in chunks] == [4, 4, 2]
+    assert sum(item.credits for item in chunks) == 10
+    assert all(item.credits <= ledger.capacity_credits for item in chunks)
+    assert second.starts_at_work >= chunks[0].releases_at_work
+    assert ledger.peak_reserved_decode_credits <= ledger.capacity_credits
+
+    ledger.activate("large", 0, 10, starts_at_work=0, finishes_at_work=9)
+    assert ledger.reserved_decode_credits == 11
+    assert ledger.decode_residency["large"] == 9
+    assert ("small", 0) not in ledger._active
+    assert ledger.available_at(1, now_work=8, exclude=("small", 0)) >= 9
+    endpoints = sorted(
+        {
+            point
+            for item in ledger._temporal_reservations()
+            for point in (item.starts_at_work, item.releases_at_work)
+        }
+    )
+    assert all(
+        sum(
+            item.credits
+            for item in ledger._temporal_reservations()
+            if item.starts_at_work <= point < item.releases_at_work
+        )
+        <= ledger.capacity_credits
+        for point in endpoints
+    )
+    ledger.settle("large", 0, actual_decode_work=12)
+    assert ledger.reconciled_credit_error == 2
+
+
+def test_positive_reservation_rejects_zero_capacity_consistently() -> None:
+    ledger = DecodeCreditLedger(capacity_credits=0)
+
+    with pytest.raises(ValueError, match="positive capacity"):
+        ledger.available_at(1, now_work=0)
+    with pytest.raises(ValueError, match="positive capacity"):
+        ledger.reserve("request", 0, 1, now_work=0)
+
+
+@pytest.mark.parametrize("capacity", [-1, math.inf, math.nan])
+def test_ledger_rejects_invalid_capacity(capacity: float) -> None:
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        DecodeCreditLedger(capacity)
+
+
+@pytest.mark.parametrize("credits", [-1, math.inf, math.nan])
+def test_ledger_rejects_invalid_reservation_credits(credits: float) -> None:
+    ledger = DecodeCreditLedger(4)
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        ledger.available_at(credits, now_work=0)
+
+
+def test_reservation_checks_future_starts_across_its_entire_interval() -> None:
+    ledger = DecodeCreditLedger(capacity_credits=4)
+    ledger.reserve("large", 0, 10, now_work=0)
+    ledger.reserve("small", 0, 1, now_work=0)
+    ledger.activate("large", 0, 10, starts_at_work=0, finishes_at_work=3)
+
+    ledger.reserve("new", 0, 8, now_work=3)
+
+    endpoints = sorted(
+        {
+            point
+            for item in ledger._temporal_reservations()
+            for point in (item.starts_at_work, item.releases_at_work)
+        }
+    )
+    assert all(
+        sum(
+            item.credits
+            for item in ledger._temporal_reservations()
+            if item.starts_at_work <= point < item.releases_at_work
+        )
+        <= ledger.capacity_credits
+        for point in endpoints
+    )
+    assert ledger._active[("new", 0)][1].starts_at_work >= 9
+
+
+def test_rejected_activation_leaves_plans_and_debt_unchanged() -> None:
+    ledger = DecodeCreditLedger(capacity_credits=4)
+    ledger.reserve("running", 0, 4, now_work=0)
+    ledger.activate("running", 0, 4, starts_at_work=0, finishes_at_work=10)
+    ledger.reserve("next", 0, 4, now_work=0)
+    before_active = dict(ledger._active)
+    before_executing = dict(ledger._executing)
+    before_debt = ledger.reserved_decode_credits
+
+    with pytest.raises(ValueError, match="activation exceeds"):
+        ledger.activate("next", 0, 4, starts_at_work=5, finishes_at_work=9)
+
+    assert ledger._active == before_active
+    assert ledger._executing == before_executing
+    assert ledger.reserved_decode_credits == before_debt
+
+
+def test_gated_dp_accepts_prediction_larger_than_shared_capacity() -> None:
+    policy = DecodeCapacityPolicy(
+        base(),
+        DecodeAdmissionConfig(
+            DecodeAdmissionMode.CAUSAL,
+            capacity_credits=4,
+            congestion_action=AdmissionAction.GATED_DP,
+        ),
+        predictor=PrefixFamilyPredictor(default_output_tokens=20),
+    )
+
+    first = policy.plan_attempts(request("large", 0, 20), view())[0]
+    second = policy.plan_attempts(request("small", 0, 1), view())[0]
+
+    assert first.arrival_work == 0
+    assert policy.decisions[0].reserved_decode_credits == 10
+    assert second.arrival_work > first.arrival_work
+    assert policy.ledger.peak_reserved_decode_credits <= 4
 
 
 def test_defer_moves_whole_attempt_when_d_is_idle_but_credits_are_full() -> None:
