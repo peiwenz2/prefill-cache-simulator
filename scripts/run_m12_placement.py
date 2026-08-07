@@ -206,6 +206,8 @@ def run_artifacts(trace_path: Path, output_dir: Path) -> dict[str, bytes]:
                 "verdict": pair.verdict.verdict,
                 "strictly_improved_axes": "|".join(pair.verdict.strictly_improved_axes),
                 "violated_axes": "|".join(pair.verdict.violated_axes),
+                "baseline_also_fails_floor": pair.verdict.baseline_also_fails_floor,
+                "cause": pair.verdict.cause or "",
             }
         )
 
@@ -256,6 +258,8 @@ def run_artifacts(trace_path: Path, output_dir: Path) -> dict[str, bytes]:
                 "verdict",
                 "strictly_improved_axes",
                 "violated_axes",
+                "baseline_also_fails_floor",
+                "cause",
             ),
         ),
         "failures.csv": _csv_bytes(

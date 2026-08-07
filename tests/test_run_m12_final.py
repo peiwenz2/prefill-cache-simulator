@@ -40,7 +40,9 @@ from scripts.run_m12_final import (
     _DelayedCensus,
     _FinalEvictionPolicy,
     _first_decision_diff,
+    _g12_3,
     _pareto,
+    _retry_pressure_abort_fences,
     build_cell_plan,
     execute_cell,
     placement_run_active,
@@ -105,7 +107,7 @@ def test_process_guard_detects_only_active_placement_runner() -> None:
 
 
 def test_artifacts_are_atomic_deterministic_and_load_workload_once(
-    tmp_path: Path,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     loads = 0
 
@@ -132,6 +134,12 @@ def test_artifacts_are_atomic_deterministic_and_load_workload_once(
         binding_cells=binding,
     )
     assert loads == 2  # exactly once per complete experiment, never per cell
+    plan = build_cell_plan(binding)
+    expected_progress = [
+        f"[{index:03d}/{len(plan):03d}] {cell.cell_id}"
+        for index, cell in enumerate(plan, start=1)
+    ]
+    assert capsys.readouterr().err.splitlines() == expected_progress * 2
     assert first == second
     manifest = json.loads((left / "MANIFEST.json").read_text())
     assert {
@@ -211,6 +219,81 @@ def test_real_executor_smoke_uses_fixed_workload(strategy: str) -> None:
     assert result.offered_tokens == 6
     assert result.total_work == pytest.approx(result.accounted_work)
     assert result.p_to_d_debt == 0
+
+
+def test_predeclared_causal_cell_exercises_abort_retry_pressure() -> None:
+    workload = tuple(
+        KernelRequestSpec(
+            LogicalRequestSpec(
+                f"retry-{index}", "tenant", "STANDARD", 0, 2, 20
+            ),
+            (f"K-{index}",),
+            (2,),
+        )
+        for index in range(33)
+    )
+    cell = next(
+        cell
+        for cell in build_cell_plan(set())
+        if cell.regime == "MIXED"
+        and cell.arrival_scale == 1.5
+        and cell.strategy == "DECODE_CAUSAL"
+    )
+    result = execute_cell(workload, cell)
+    assert result.attempt_count > result.offered_requests
+    assert result.retry_count == result.attempt_count - result.offered_requests
+    assert result.decode_report is not None
+    assert result.decode_report.preemptions > 0
+    assert result.congestion_action == "GATED_DP"
+    assert result.gated_retry_count > 0
+    no_gate_cell = next(
+        item
+        for item in build_cell_plan(set())
+        if item.regime == "MIXED" and item.strategy == "DECODE_NO_GATE"
+    )
+    no_gate = execute_cell(workload, no_gate_cell)
+    gate = _g12_3(
+        (no_gate, result), expected_cells=(no_gate_cell, cell)
+    )
+    assert gate["retry_pressure_covered"] is True
+
+    configured_but_unproven = replace(result, gated_retry_count=0)
+    assert _g12_3(
+        (no_gate, configured_but_unproven), expected_cells=(no_gate_cell, cell)
+    )["retry_pressure_covered"] is False
+
+    defer_result = replace(result, congestion_action="DEFER")
+    assert _g12_3(
+        (no_gate, defer_result), expected_cells=(no_gate_cell, cell)
+    )["retry_pressure_covered"] is False
+
+    wrong_cell_result = replace(
+        result,
+        cell=replace(cell, regime="COMPUTE_BOUND"),
+    )
+    assert _g12_3(
+        (no_gate, wrong_cell_result),
+        expected_cells=(no_gate_cell, wrong_cell_result.cell),
+    )["retry_pressure_covered"] is False
+
+
+def test_retry_fences_are_predeclared_without_future_output_labels() -> None:
+    workload = (
+        KernelRequestSpec(
+            LogicalRequestSpec("short", "t", "STANDARD", 0, 1, 1),
+            ("A",),
+            (1,),
+        ),
+        KernelRequestSpec(
+            LogicalRequestSpec("long", "t", "STANDARD", 0, 1, 100),
+            ("B",),
+            (1,),
+        ),
+    )
+    fences = _retry_pressure_abort_fences(workload, enabled=True)
+    assert set(fences) == {"short", "long"}
+    assert all(fence.allows_abort for fence in fences.values())
+    assert _retry_pressure_abort_fences(workload, enabled=False) == {}
 
 
 def test_capacity_binding_ceiling_is_causal_contiguous_prefix() -> None:

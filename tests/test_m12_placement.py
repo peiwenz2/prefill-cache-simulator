@@ -14,6 +14,7 @@ from prefill_cache_sim.m12_placement import (
     M12PlacementPolicy,
     PlacementMode,
     TraceRequestInput,
+    _case_cost,
     build_kernel_requests,
     build_m12_2_cases,
     run_placement_case,
@@ -498,38 +499,81 @@ def test_case_contention_changes_executed_kvs_and_completion() -> None:
                 "m",
                 "a",
                 "s",
-                100,
+                100_000,
+                ("p0",),
+            ),
+            TraceRequestInput(
+                "blocker",
+                "t",
+                "STANDARD",
+                80_002,
+                ("B",),
+                (2,),
+                2,
+                "m",
+                "a",
+                "s",
+                100_000,
                 ("p0",),
             ),
             TraceRequestInput(
                 "reuse",
                 "t",
                 "STANDARD",
-                3,
+                80_002.01,
                 ("K",),
-                (10,),
+                (1_000_000,),
                 2,
                 "m",
                 "a",
                 "s",
-                100,
-                ("p1",),
+                100_000,
+                ("p0", "p1"),
             ),
         ]
     )
-    cases = build_m12_2_cases(horizon=100, tier_slo_work={"STANDARD": 20})
+    cases = build_m12_2_cases(
+        horizon=100_000, tier_slo_work={"STANDARD": 100_000}
+    )
     normal = next(
         c
         for c in cases
         if c.kvs_mode is KvsPriceMode.NORMAL
         and c.kvs_contention_multiplier == 1
         and not c.decode_binding
+        and c.regime.regime_id.value == "COMPUTE_BOUND"
     )
-    contended = next(c for c in cases if c.kvs_contention_multiplier > 1)
+    contended = next(
+        c
+        for c in cases
+        if c.kvs_contention_multiplier > 1
+        and c.regime.regime_id.value == "COMPUTE_BOUND"
+    )
     normal_report = run_placement_case(workload, normal).priced_spill
     contended_report = run_placement_case(workload, contended).priced_spill
-    assert contended_report.kvs_normalized_work > normal_report.kvs_normalized_work
+    assert normal_report.remote_hit_tokens == 1_000_000
+    assert contended_report.remote_hit_tokens == 0
+    assert normal_report.spill_count == 1
+    assert contended_report.spill_count == 0
+    assert contended_report.kvs_normalized_work < normal_report.kvs_normalized_work
+    assert contended_report.p_queue_p95 > normal_report.p_queue_p95
     assert contended_report.completion_max_work > normal_report.completion_max_work
+
+
+def test_case_contention_is_applied_once_to_policy_and_kernel_costs() -> None:
+    case = next(
+        case
+        for case in build_m12_2_cases(
+            horizon=100, tier_slo_work={"STANDARD": 20}
+        )
+        if case.kvs_contention_multiplier > 1
+        and case.kvs_mode is KvsPriceMode.NORMAL
+    )
+    executed = _case_cost(case)
+    policy_base = _case_cost(case, include_contention=False)
+    assert executed.kvs_work_per_token == pytest.approx(
+        policy_base.kvs_work_per_token * case.kvs_contention_multiplier
+    )
 
 
 def test_s4_common_system_block_does_not_link_unrelated_requests() -> None:

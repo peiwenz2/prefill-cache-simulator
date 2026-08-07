@@ -172,6 +172,8 @@ class G12TwoVerdict:
     verdict: str
     strictly_improved_axes: tuple[str, ...]
     violated_axes: tuple[str, ...]
+    baseline_also_fails_floor: bool
+    cause: str | None
 
 
 def evaluate_g12_2(
@@ -242,12 +244,41 @@ def evaluate_g12_2(
         )
         if violation
     )
+    floor_axes = {"minimum_tier_slo_attainment", "jain_fairness"}
+    baseline_failed_floor_axes = {
+        name
+        for name, failed in (
+            (
+                "minimum_tier_slo_attainment",
+                baseline.minimum_tier_slo_attainment < 0.80,
+            ),
+            ("jain_fairness", baseline.jain_fairness < 0.90),
+        )
+        if failed
+    }
+    candidate_failed_floor_axes = set(violated) & floor_axes
+    baseline_also_fails_floor = bool(
+        candidate_failed_floor_axes & baseline_failed_floor_axes
+    )
+    if violated:
+        cause = (
+            "saturated-floor"
+            if set(violated) <= floor_axes
+            and set(violated) <= baseline_failed_floor_axes
+            else "harm"
+        )
+    elif len(improved) < 2:
+        cause = "no-benefit"
+    else:
+        cause = None
     return G12TwoVerdict(
         "PASS_PROVISIONAL"
         if len(improved) >= 2 and not violated
         else "KILL_ENFORCEMENT",
         improved,
         violated,
+        baseline_also_fails_floor,
+        cause,
     )
 
 

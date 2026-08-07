@@ -112,6 +112,47 @@ def test_g12_2_requires_two_strict_axis_improvements() -> None:
         evaluate_g12_2(baseline, metrics(token_hit_rate=0.51, p_queue_p95=99)).verdict
         == "PASS_PROVISIONAL"
     )
+    no_benefit = evaluate_g12_2(baseline, metrics(token_hit_rate=0.51))
+    assert no_benefit.baseline_also_fails_floor is False
+    assert no_benefit.cause == "no-benefit"
+
+
+def test_g12_2_distinguishes_harm_from_saturated_floor() -> None:
+    harm = evaluate_g12_2(
+        metrics(strategy_id="HYBRID"),
+        metrics(token_hit_rate=0.4),
+    )
+    assert harm.cause == "harm"
+    saturated = evaluate_g12_2(
+        metrics(
+            strategy_id="HYBRID",
+            minimum_tier_slo_attainment=0.7,
+            per_tier_slo_attainment={"STRICT": 0.7, "STANDARD": 0.9},
+        ),
+        metrics(
+            token_hit_rate=0.51,
+            minimum_tier_slo_attainment=0.7,
+            per_tier_slo_attainment={"STRICT": 0.7, "STANDARD": 0.9},
+        ),
+    )
+    assert saturated.baseline_also_fails_floor is True
+    assert saturated.cause == "saturated-floor"
+
+
+def test_g12_2_baseline_floor_flag_requires_same_failed_axis() -> None:
+    baseline = metrics(strategy_id="HYBRID", jain_fairness=0.89)
+    mismatched = evaluate_g12_2(
+        baseline,
+        metrics(
+            minimum_tier_slo_attainment=0.79,
+            per_tier_slo_attainment={"STRICT": 0.79, "STANDARD": 0.9},
+        ),
+    )
+    assert mismatched.cause == "harm"
+    assert mismatched.baseline_also_fails_floor is False
+
+    candidate_passes = evaluate_g12_2(baseline, metrics())
+    assert candidate_passes.baseline_also_fails_floor is False
 
 
 def test_g12_2_fails_output_fairness_or_epsilon_regression() -> None:

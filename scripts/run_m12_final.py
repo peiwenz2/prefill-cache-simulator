@@ -28,6 +28,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from prefill_cache_sim.config import git_provenance  # noqa: E402
 from prefill_cache_sim.m12_decode import (  # noqa: E402
+    AbortFence,
+    AdmissionAction,
     DecodeAdmissionConfig,
     DecodeAdmissionMode,
     DecodeCapacityPolicy,
@@ -46,6 +48,7 @@ from prefill_cache_sim.m12_eviction import (  # noqa: E402
 )
 from prefill_cache_sim.m12_kernel import (  # noqa: E402
     AttemptExecutionSpec,
+    AttemptTerminal,
     CacheMutation,
     CausalKernel,
     CausalView,
@@ -120,8 +123,18 @@ class CellResult:
     decision_fingerprint: str = ""
     census_age_work: float | None = None
     visibility_delay_work: float = 0.0
+    attempt_count: int = -1
+    retry_count: int = -1
+    congestion_action: str | None = None
+    gated_retry_count: int = 0
 
     def __post_init__(self) -> None:
+        if self.attempt_count == -1:
+            object.__setattr__(self, "attempt_count", self.offered_requests)
+        if self.retry_count == -1:
+            object.__setattr__(
+                self, "retry_count", self.attempt_count - self.offered_requests
+            )
         numeric = (
             self.strict_goodput,
             self.strict_output_goodput,
@@ -144,6 +157,12 @@ class CellResult:
             raise ValueError("cell results must be finite")
         if self.offered_requests < 0 or self.offered_tokens < 0:
             raise ValueError("offered workload must be non-negative")
+        if self.attempt_count < self.offered_requests or self.retry_count < 0:
+            raise ValueError("attempt and retry counts must cover offered requests")
+        if self.retry_count != self.attempt_count - self.offered_requests:
+            raise ValueError("retry count must equal attempts minus offered requests")
+        if not 0 <= self.gated_retry_count <= self.retry_count:
+            raise ValueError("gated retry count must be covered by retries")
 
 
 def build_cell_plan(
@@ -221,7 +240,12 @@ def run_artifacts(
     plan = build_cell_plan(binding)
     results: list[CellResult] = []
     failures: list[dict[str, object]] = []
-    for cell in plan:
+    for index, cell in enumerate(plan, start=1):
+        print(
+            f"[{index:03d}/{len(plan):03d}] {cell.cell_id}",
+            file=sys.stderr,
+            flush=True,
+        )
         try:
             result = cached_results.get(cell.cell_id) or execute(workload, cell)
             if result.cell != cell:
@@ -552,7 +576,22 @@ class _DecisionLedgerPolicy(KernelPolicy):
         attempt: AttemptExecutionSpec,
         view: CausalView,
     ) -> AttemptExecutionSpec:
-        return self.inner.reprice_decode(request, attempt, view)
+        repriced = self.inner.reprice_decode(request, attempt, view)
+        if repriced.terminal is AttemptTerminal.ABORTED and self.decode is not None:
+            fence = self.decode.config.abort_fences.get(
+                request.logical.logical_request_id
+            )
+            self._append(
+                {
+                    "logical_id": repriced.logical_request_id,
+                    "attempt_index": repriced.attempt_index,
+                    "decision_kind": "ABORT_FENCE",
+                    "fence_valid": fence is not None and fence.allows_abort,
+                    "terminal": repriced.terminal.value,
+                },
+                at_work=view.now_work,
+            )
+        return repriced
 
     def decode_started(
         self,
@@ -670,12 +709,30 @@ def execute_cell(
         "DECODE_ORACLE_NOISED": DecodeAdmissionMode.ORACLE_NOISED,
     }.get(cell.strategy, DecodeAdmissionMode.CAUSAL)
     if cell.strategy not in ("BASELINE", "PRICED_SPILL"):
+        retry_pressure_cell = (
+            cell.regime == "MIXED"
+            and cell.arrival_scale == 1.5
+            and cell.strategy == "DECODE_CAUSAL"
+        )
+        abort_fences = _retry_pressure_abort_fences(
+            scaled, enabled=retry_pressure_cell
+        )
         decode = DecodeCapacityPolicy(
             placement,
             DecodeAdmissionConfig(
                 decode_mode,
-                capacity_credits=max(1.0, 4096 * cost.decode_work_per_token),
+                capacity_credits=max(
+                    1.0,
+                    (128 if retry_pressure_cell else 4096)
+                    * cost.decode_work_per_token,
+                ),
+                congestion_action=(
+                        AdmissionAction.GATED_DP
+                    if retry_pressure_cell
+                    else AdmissionAction.DEFER
+                ),
                 oracle_noise_multiplier=1.25,
+                abort_fences=abort_fences,
             ),
             predictor=_DelayedPredictor(
                 PrefixFamilyPredictor(default_output_tokens=128),
@@ -741,6 +798,33 @@ def execute_cell(
         for item in ledger_policy.records
     )
     decision_fingerprint = hashlib.sha256("\n".join(decision_log).encode()).hexdigest()
+    gated_retry_count = 0
+    if decode is not None:
+        gated_ids = {
+            decision.logical_request_id
+            for decision in decode.decisions
+            if decision.action in (AdmissionAction.GATED_PD, AdmissionAction.GATED_DP)
+        }
+        valid_fence_ids = {
+            logical_id
+            for logical_id, fence in decode.config.abort_fences.items()
+            if fence.allows_abort
+        }
+        aborted_ids = {
+            str(record["logical_id"])
+            for record in ledger_policy.records
+            if record.get("decision_kind") == "ABORT_FENCE"
+            and record.get("fence_valid") is True
+            and record.get("terminal") == AttemptTerminal.ABORTED.value
+        }
+        retried_ids = {
+            attempt.logical_request_id
+            for attempt in result.attempts
+            if attempt.attempt_index > 0
+        }
+        gated_retry_count = len(
+            gated_ids & valid_fence_ids & aborted_ids & retried_ids
+        )
     return CellResult(
         cell,
         metrics.offered_logical_requests,
@@ -770,7 +854,22 @@ def execute_cell(
         decision_fingerprint,
         visibility_delay_work if cell.strategy == "CENSUS_EVICTION" else None,
         visibility_delay_work,
+        metrics.attempt_count,
+        metrics.attempt_count - metrics.offered_logical_requests,
+        decode.config.congestion_action.value if decode is not None else None,
+        gated_retry_count,
     )
+
+
+def _retry_pressure_abort_fences(
+    workload: Sequence[KernelRequestSpec], *, enabled: bool
+) -> dict[str, AbortFence]:
+    if not enabled:
+        return {}
+    return {
+        item.logical.logical_request_id: AbortFence(True, -1.0, True, 1)
+        for item in workload
+    }
 
 
 def _scaled_workload(
@@ -883,6 +982,10 @@ def _primary_row(result: CellResult) -> dict[str, object]:
         **_base_row(result),
         "offered_requests": result.offered_requests,
         "offered_tokens": result.offered_tokens,
+        "attempt_count": result.attempt_count,
+        "retry_count": result.retry_count,
+        "congestion_action": result.congestion_action,
+        "gated_retry_count": result.gated_retry_count,
         "strict_goodput": result.strict_goodput,
         "strict_output_goodput": result.strict_output_goodput,
         "request_goodput": result.request_goodput,
@@ -1370,6 +1473,7 @@ def _g12_3(
                 rows.append(
                     {
                         "regime": regime,
+                        "arrival_scale": 1.5,
                         "strategy": strategy,
                         "status": "INCOMPLETE",
                         "passed": False,
@@ -1386,12 +1490,17 @@ def _g12_3(
             rows.append(
                 {
                     "regime": regime,
+                    "arrival_scale": candidate.cell.arrival_scale,
                     "strategy": strategy,
                     "status": "SENSITIVITY_ONLY" if oracle else verdict.conclusion,
                     "passed": verdict.passed and not oracle,
                     "sensitivity_passed": verdict.passed,
                     "deployable": verdict.deployable_conclusion and not oracle,
                     "canonical_verdict": asdict(verdict),
+                    "attempt_count": candidate.attempt_count,
+                    "retry_count": candidate.retry_count,
+                    "congestion_action": candidate.congestion_action,
+                    "gated_retry_count": candidate.gated_retry_count,
                 }
             )
     causal = [row for row in rows if row["strategy"] == "DECODE_CAUSAL"]
@@ -1402,7 +1511,22 @@ def _g12_3(
         if causal and all(bool(row["passed"]) for row in causal)
         else "NARROW_OVERLOAD_ONLY"
     )
-    return {"overall_verdict": overall, "cells": rows}
+    retry_pressure_covered = any(
+        row["regime"] == "MIXED"
+        and row["arrival_scale"] == 1.5
+        and row["strategy"] == "DECODE_CAUSAL"
+        and isinstance(gated_retry_count := row.get("gated_retry_count"), int)
+        and gated_retry_count > 0
+        and row.get("congestion_action") in {"GATED_PD", "GATED_DP"}
+        for row in rows
+    )
+    if not retry_pressure_covered:
+        overall = "INCOMPLETE_RETRY_PRESSURE"
+    return {
+        "overall_verdict": overall,
+        "retry_pressure_covered": retry_pressure_covered,
+        "cells": rows,
+    }
 
 
 def _g12_4(

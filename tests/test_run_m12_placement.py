@@ -95,6 +95,9 @@ def test_artifacts_are_deterministic_atomic_and_manifested(tmp_path: Path) -> No
     assert len(config["source_combined_sha256"]) == 64
     assert len(config["dirty_patch_sha256"]) == 64
     assert read_valid_artifact_set(left) == left_manifest
+    verdict_header = (left / "comparisons/g12-verdicts.csv").read_text().splitlines()[0]
+    assert "baseline_also_fails_floor" in verdict_header
+    assert "cause" in verdict_header
 
 
 def test_failed_grid_publishes_diagnostics_then_raises(

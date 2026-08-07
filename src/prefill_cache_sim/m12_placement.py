@@ -629,6 +629,7 @@ def run_placement_case(
     truth = workload.request_truth if isinstance(workload, PlacementWorkload) else {}
     for mode in modes:
         cost = _case_cost(case)
+        policy_cost = _case_cost(case, include_contention=False)
         config = KernelConfig(
             0,
             case.horizon,
@@ -640,10 +641,10 @@ def run_placement_case(
         )
         policy = M12PlacementPolicy(
             mode,
-            cost,
+            policy_cost,
             kvs_enabled=case.kvs_mode is not KvsPriceMode.DISABLED,
             request_truth=truth,
-            kvs_contention_multiplier=1.0,
+            kvs_contention_multiplier=case.kvs_contention_multiplier,
         )
         reports.append(policy.summarize(CausalKernel(config).run(workload, policy)))
     hybrid, priced = reports[:2]
@@ -663,7 +664,9 @@ def run_placement_case(
     )
 
 
-def _case_cost(case: M12PlacementCase) -> FrozenKernelCostModel:
+def _case_cost(
+    case: M12PlacementCase, *, include_contention: bool = True
+) -> FrozenKernelCostModel:
     multiplier = {
         KvsPriceMode.DISABLED: 0.0,
         KvsPriceMode.NORMAL: 1.0,
@@ -671,7 +674,9 @@ def _case_cost(case: M12PlacementCase) -> FrozenKernelCostModel:
     }[case.kvs_mode]
     return FrozenKernelCostModel(
         case.regime.prefill_token_work,
-        case.regime.kvs_byte_work * multiplier * case.kvs_contention_multiplier,
+        case.regime.kvs_byte_work
+        * multiplier
+        * (case.kvs_contention_multiplier if include_contention else 1.0),
         1,
         case.regime.decode_token_work * (4 if case.decode_binding else 1),
     )
