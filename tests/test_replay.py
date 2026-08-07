@@ -4,6 +4,8 @@ import hashlib
 import importlib.util
 import json
 import math
+import re
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
@@ -2258,15 +2260,24 @@ def test_published_replay_records_source_fingerprints() -> None:
     manifest = payload["provenance"]["source_fingerprints"]
     assert manifest["reproducibility_claim"] == REPRODUCIBILITY_CLAIM
     assert manifest["combined_digest"] == combined_digest(manifest["files"])
-    # Internal consistency is not enough: a stale artifact recomputes its own
-    # digest happily. The recorded file map has to name the sources on disk now,
-    # digest for digest, or the published numbers came from code nobody can read.
-    live = source_fingerprints(REPO_ROOT)
-    assert manifest["files"] == live, (
-        "results/m10-synthetic/replay.json fingerprints are stale; "
-        "rerun scripts/run_m10_synthetic.py"
-    )
-    assert manifest["combined_digest"] == combined_digest(live)
+    # Historical artifacts are bound to the source tree recorded at generation
+    # time, not to today's HEAD.  Verify every named file against that immutable
+    # git object so later M12 work does not make valid M10 evidence fail closed.
+    git_sha = payload["provenance"]["git_sha"]
+    assert re.fullmatch(r"[0-9a-f]{40}", git_sha), "invalid historical git SHA"
+    committed = {
+        name: hashlib.sha256(
+            subprocess.run(
+                ["git", "show", f"{git_sha}:{name}"],
+                cwd=REPO_ROOT,
+                check=True,
+                capture_output=True,
+            ).stdout
+        ).hexdigest()
+        for name in manifest["files"]
+    }
+    assert manifest["files"] == committed
+    assert manifest["combined_digest"] == combined_digest(committed)
 
 
 def test_published_replay_never_claims_hardware_it_did_not_touch() -> None:

@@ -1,0 +1,277 @@
+{
+  "groups": [
+    {
+      "arrival_scale": 0.8,
+      "cache_capacity_entries": 183166,
+      "candidate_set": [
+        "BASELINE",
+        "DECODE_CAUSAL",
+        "PRICED_SPILL"
+      ],
+      "excluded": [],
+      "frontier_cell_ids": [
+        "COMPUTE_BOUND-0.8x-BASELINE",
+        "COMPUTE_BOUND-0.8x-DECODE_CAUSAL",
+        "COMPUTE_BOUND-0.8x-PRICED_SPILL"
+      ],
+      "missing": [],
+      "regime": "COMPUTE_BOUND",
+      "status": "COMPLETE"
+    },
+    {
+      "arrival_scale": 1.0,
+      "cache_capacity_entries": 183166,
+      "candidate_set": [
+        "BASELINE",
+        "DECODE_CAUSAL",
+        "PRICED_SPILL"
+      ],
+      "excluded": [],
+      "frontier_cell_ids": [
+        "COMPUTE_BOUND-1.0x-BASELINE",
+        "COMPUTE_BOUND-1.0x-DECODE_CAUSAL",
+        "COMPUTE_BOUND-1.0x-PRICED_SPILL"
+      ],
+      "missing": [],
+      "regime": "COMPUTE_BOUND",
+      "status": "COMPLETE"
+    },
+    {
+      "arrival_scale": 1.2,
+      "cache_capacity_entries": 183166,
+      "candidate_set": [
+        "BASELINE",
+        "DECODE_CAUSAL",
+        "PRICED_SPILL"
+      ],
+      "excluded": [],
+      "frontier_cell_ids": [
+        "COMPUTE_BOUND-1.2x-BASELINE",
+        "COMPUTE_BOUND-1.2x-DECODE_CAUSAL",
+        "COMPUTE_BOUND-1.2x-PRICED_SPILL"
+      ],
+      "missing": [],
+      "regime": "COMPUTE_BOUND",
+      "status": "COMPLETE"
+    },
+    {
+      "arrival_scale": 1.5,
+      "cache_capacity_entries": 183166,
+      "candidate_set": [
+        "BASELINE",
+        "DECODE_CAUSAL",
+        "PRICED_SPILL"
+      ],
+      "excluded": [],
+      "frontier_cell_ids": [
+        "COMPUTE_BOUND-1.5x-BASELINE",
+        "COMPUTE_BOUND-1.5x-DECODE_CAUSAL",
+        "COMPUTE_BOUND-1.5x-PRICED_SPILL"
+      ],
+      "missing": [],
+      "regime": "COMPUTE_BOUND",
+      "status": "COMPLETE"
+    },
+    {
+      "arrival_scale": 2.0,
+      "cache_capacity_entries": 183166,
+      "candidate_set": [
+        "BASELINE",
+        "DECODE_CAUSAL",
+        "PRICED_SPILL"
+      ],
+      "excluded": [
+        "COMPUTE_BOUND-2.0x-DECODE_CAUSAL",
+        "COMPUTE_BOUND-2.0x-PRICED_SPILL"
+      ],
+      "frontier_cell_ids": [
+        "COMPUTE_BOUND-2.0x-BASELINE"
+      ],
+      "missing": [],
+      "regime": "COMPUTE_BOUND",
+      "status": "COMPLETE"
+    },
+    {
+      "arrival_scale": 0.8,
+      "cache_capacity_entries": 183166,
+      "candidate_set": [
+        "BASELINE",
+        "DECODE_CAUSAL",
+        "PRICED_SPILL"
+      ],
+      "excluded": [
+        "MEMORY_BOUND-0.8x-DECODE_CAUSAL",
+        "MEMORY_BOUND-0.8x-PRICED_SPILL"
+      ],
+      "frontier_cell_ids": [
+        "MEMORY_BOUND-0.8x-BASELINE"
+      ],
+      "missing": [],
+      "regime": "MEMORY_BOUND",
+      "status": "COMPLETE"
+    },
+    {
+      "arrival_scale": 1.0,
+      "cache_capacity_entries": 183166,
+      "candidate_set": [
+        "BASELINE",
+        "DECODE_CAUSAL",
+        "PRICED_SPILL"
+      ],
+      "excluded": [
+        "MEMORY_BOUND-1.0x-DECODE_CAUSAL",
+        "MEMORY_BOUND-1.0x-PRICED_SPILL"
+      ],
+      "frontier_cell_ids": [
+        "MEMORY_BOUND-1.0x-BASELINE"
+      ],
+      "missing": [],
+      "regime": "MEMORY_BOUND",
+      "status": "COMPLETE"
+    },
+    {
+      "arrival_scale": 1.2,
+      "cache_capacity_entries": 183166,
+      "candidate_set": [
+        "BASELINE",
+        "DECODE_CAUSAL",
+        "PRICED_SPILL"
+      ],
+      "excluded": [
+        "MEMORY_BOUND-1.2x-DECODE_CAUSAL",
+        "MEMORY_BOUND-1.2x-PRICED_SPILL"
+      ],
+      "frontier_cell_ids": [
+        "MEMORY_BOUND-1.2x-BASELINE"
+      ],
+      "missing": [],
+      "regime": "MEMORY_BOUND",
+      "status": "COMPLETE"
+    },
+    {
+      "arrival_scale": 1.5,
+      "cache_capacity_entries": 183166,
+      "candidate_set": [
+        "BASELINE",
+        "DECODE_CAUSAL",
+        "PRICED_SPILL"
+      ],
+      "excluded": [
+        "MEMORY_BOUND-1.5x-DECODE_CAUSAL",
+        "MEMORY_BOUND-1.5x-PRICED_SPILL"
+      ],
+      "frontier_cell_ids": [
+        "MEMORY_BOUND-1.5x-BASELINE"
+      ],
+      "missing": [],
+      "regime": "MEMORY_BOUND",
+      "status": "COMPLETE"
+    },
+    {
+      "arrival_scale": 2.0,
+      "cache_capacity_entries": 183166,
+      "candidate_set": [
+        "BASELINE",
+        "DECODE_CAUSAL",
+        "PRICED_SPILL"
+      ],
+      "excluded": [
+        "MEMORY_BOUND-2.0x-DECODE_CAUSAL",
+        "MEMORY_BOUND-2.0x-PRICED_SPILL"
+      ],
+      "frontier_cell_ids": [
+        "MEMORY_BOUND-2.0x-BASELINE"
+      ],
+      "missing": [],
+      "regime": "MEMORY_BOUND",
+      "status": "COMPLETE"
+    },
+    {
+      "arrival_scale": 0.8,
+      "cache_capacity_entries": 183166,
+      "candidate_set": [
+        "BASELINE",
+        "DECODE_CAUSAL",
+        "PRICED_SPILL"
+      ],
+      "excluded": [],
+      "frontier_cell_ids": [
+        "MIXED-0.8x-DECODE_CAUSAL",
+        "MIXED-0.8x-PRICED_SPILL"
+      ],
+      "missing": [],
+      "regime": "MIXED",
+      "status": "COMPLETE"
+    },
+    {
+      "arrival_scale": 1.0,
+      "cache_capacity_entries": 183166,
+      "candidate_set": [
+        "BASELINE",
+        "DECODE_CAUSAL",
+        "PRICED_SPILL"
+      ],
+      "excluded": [],
+      "frontier_cell_ids": [
+        "MIXED-1.0x-DECODE_CAUSAL",
+        "MIXED-1.0x-PRICED_SPILL"
+      ],
+      "missing": [],
+      "regime": "MIXED",
+      "status": "COMPLETE"
+    },
+    {
+      "arrival_scale": 1.2,
+      "cache_capacity_entries": 183166,
+      "candidate_set": [
+        "BASELINE",
+        "DECODE_CAUSAL",
+        "PRICED_SPILL"
+      ],
+      "excluded": [],
+      "frontier_cell_ids": [
+        "MIXED-1.2x-DECODE_CAUSAL",
+        "MIXED-1.2x-PRICED_SPILL"
+      ],
+      "missing": [],
+      "regime": "MIXED",
+      "status": "COMPLETE"
+    },
+    {
+      "arrival_scale": 1.5,
+      "cache_capacity_entries": 183166,
+      "candidate_set": [
+        "BASELINE",
+        "DECODE_CAUSAL",
+        "PRICED_SPILL"
+      ],
+      "excluded": [
+        "MIXED-1.5x-DECODE_CAUSAL"
+      ],
+      "frontier_cell_ids": [
+        "MIXED-1.5x-PRICED_SPILL"
+      ],
+      "missing": [],
+      "regime": "MIXED",
+      "status": "COMPLETE"
+    },
+    {
+      "arrival_scale": 2.0,
+      "cache_capacity_entries": 183166,
+      "candidate_set": [
+        "BASELINE",
+        "DECODE_CAUSAL",
+        "PRICED_SPILL"
+      ],
+      "excluded": [],
+      "frontier_cell_ids": [
+        "MIXED-2.0x-DECODE_CAUSAL",
+        "MIXED-2.0x-PRICED_SPILL"
+      ],
+      "missing": [],
+      "regime": "MIXED",
+      "status": "COMPLETE"
+    }
+  ],
+  "overall_verdict": "COMPLETE"
+}

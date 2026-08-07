@@ -1,0 +1,37 @@
+{
+  "binding_cells": [],
+  "completed_cell_count": 54,
+  "failed_cell_count": 0,
+  "input_tokens": 202791701,
+  "output_tokens": 4299817,
+  "planned_cell_count": 54,
+  "record_count": 23608,
+  "repair_mode": "MIXED_PROVENANCE_SINGLE_CELL",
+  "tenant_counts": {
+    "tenant-00": 1412,
+    "tenant-01": 1454,
+    "tenant-02": 1528,
+    "tenant-03": 1470,
+    "tenant-04": 1484,
+    "tenant-05": 1478,
+    "tenant-06": 1452,
+    "tenant-07": 1506,
+    "tenant-08": 1434,
+    "tenant-09": 1516,
+    "tenant-10": 1533,
+    "tenant-11": 1462,
+    "tenant-12": 1424,
+    "tenant-13": 1422,
+    "tenant-14": 1523,
+    "tenant-15": 1510
+  },
+  "tier_counts": {
+    "RELAXED": 4723,
+    "STANDARD": 14105,
+    "STRICT": 4780
+  },
+  "trace_sha256": "b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711",
+  "truth_basis": "SYNTHETIC_TENANT_TIER_ON_TRACE",
+  "unique_raw_blocks": 183166,
+  "workload_parse_count": 1
+}

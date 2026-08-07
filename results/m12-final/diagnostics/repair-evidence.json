@@ -1,0 +1,77 @@
+{
+  "base_run": {
+    "cell_count": 53,
+    "git_sha": "a469688e2225c87ab18a454b1e12e7addf6a4a7f"
+  },
+  "invariance_evidence": {
+    "method": "CSV_ROW_BYTES_AND_DECISION_FINGERPRINT",
+    "samples": [
+      {
+        "artifact_sha256": "40bf1e073eced72fd2bd03a13ad343d89da4fc50906368c995b073a1cae39135",
+        "cell_id": "COMPUTE_BOUND-0.8x-BASELINE",
+        "decision_fingerprint": "b64978c332f32e8a326fa014a01fe4e7125f20c46ae44c9b332ae9346cb9fc75",
+        "row_bytes_equal": true
+      },
+      {
+        "artifact_sha256": "90cccb2b839c780d9a81c2a7e8265ea1e2fefa6a1715f52ebf1dd03f609a5312",
+        "cell_id": "MEMORY_BOUND-2.0x-DECODE_CAUSAL",
+        "decision_fingerprint": "6f3efa82c687650c51941c89af049f1cec13f1f83dc8e37f691a247266a433fb",
+        "row_bytes_equal": true
+      },
+      {
+        "artifact_sha256": "b95a9cec3b7a573b9d00a338b3fc672cf1404e2ddf5f3f98cf5725d876e1b233",
+        "cell_id": "MIXED-1.5x-BASELINE",
+        "decision_fingerprint": "a4c7c6c0e9b571513dac76d444d109210f0dd8dbfd84cc17e042dc4f90e712a3",
+        "row_bytes_equal": true
+      },
+      {
+        "artifact_sha256": "4d04e1b46db54457da163a299bb4f5d24d42e9ae6a81e34e350f74e54ea83566",
+        "cell_id": "MIXED-1.5x-PRICED_SPILL",
+        "decision_fingerprint": "b1cf987edbbd22625cd059d9f3f0fde8a1f7a0b72bb9835145c7d14fdac1f0ae",
+        "row_bytes_equal": true
+      }
+    ],
+    "verdict": "PASS"
+  },
+  "merge": {
+    "base_manifest_sha256": "182a70aeba26c761323742b44dc8925a2c0af641f252273eee0c45742358f281",
+    "derived_recompute_scope": {
+      "affected_group": [
+        "gates/g12-3.json:MIXED-1.5x",
+        "attribution.json:MIXED-1.5x-DECODE_CREDITS",
+        "falsification/visibility-delay.json:MIXED-1.5x-DECODE_CAUSAL"
+      ],
+      "full_rows": [
+        "pareto.json",
+        "crossovers.csv"
+      ]
+    },
+    "tool_sha256": "0f6d4c63e8891873c911445766bbb6861fe9e734afc53882cc2ba8956b186137"
+  },
+  "repair_run": {
+    "attestation_basis": "operator-observed clean HEAD at each isolated run launch; payload hashes frozen before merge",
+    "cell_ids": [
+      "MIXED-1.5x-DECODE_CAUSAL",
+      "MIXED-1.5x-DECODE_NO_GATE"
+    ],
+    "git_sha": "da594318b78c0901874d784bae87e8e197dddcf7",
+    "payload_sha256": {
+      "invariance/COMPUTE_BOUND-0.8x-BASELINE.pkl": "40bf1e073eced72fd2bd03a13ad343d89da4fc50906368c995b073a1cae39135",
+      "invariance/MEMORY_BOUND-2.0x-DECODE_CAUSAL.pkl": "90cccb2b839c780d9a81c2a7e8265ea1e2fefa6a1715f52ebf1dd03f609a5312",
+      "invariance/MIXED-1.5x-BASELINE.pkl": "b95a9cec3b7a573b9d00a338b3fc672cf1404e2ddf5f3f98cf5725d876e1b233",
+      "invariance/MIXED-1.5x-PRICED_SPILL.pkl": "4d04e1b46db54457da163a299bb4f5d24d42e9ae6a81e34e350f74e54ea83566",
+      "missing-cell-delay1.pkl": "e277a2dae9548410f6cfaf425b1aecd9ef6e5063e05c22f76f2998ee07cb1f22",
+      "missing-cell.pkl": "e22f195070e81109ba4cb9059fe6b97af837e7bcbdcb4e94fb252dd1449b68de",
+      "mixed-1.5-decode-no-gate.pkl": "5c66593725c2ec479d9266a1d319574be0e270c9f3a7576a843518861c41dd32"
+    },
+    "python_version": "3.12.12",
+    "randomness_contract": "DETERMINISTIC_FIXED_RUNNER_INPUT",
+    "source_sha256": {
+      "scripts/run_m12_final.py": "1bb6119d5c105cf1aadcb72feb445eddeb47a5e5c03f58afbe9791c1e3bb86d5",
+      "src/prefill_cache_sim/m12_decode.py": "c860a439c16585fa40703d8a9867e6faffb54c8a7c90a9838afda2827183236d",
+      "src/prefill_cache_sim/m12_kernel.py": "df8b1e45aaad980a9bb10ffe7b616c7c01d839df2f25914ed3fa888df552afff"
+    },
+    "trace_sha256": "b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711"
+  },
+  "schema_version": "m12-repair-evidence-v1"
+}

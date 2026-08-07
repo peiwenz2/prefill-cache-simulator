@@ -1,0 +1,22 @@
+{
+  "algorithm": "sha256",
+  "files": {
+    "attribution.json": "5fede4d0ea122bd387adf5d4bd1c462b9c61fef51cf6b671738c1a02cc380730",
+    "config.json": "dce166f0fe65f3664f896140d798a954d73b00d3e44427f00fe1f5a8e062b465",
+    "constraints.csv": "5efcdbf0f582b7e4e2569ae3ee511d41ae50264d08cf328d5c5f27ede65221fb",
+    "contract.json": "d117854babc75c0aa045c67ddf22171e9d67710bcf5a19d75d112db45260be1a",
+    "crossovers.csv": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "diagnostics/repair-evidence.json": "cc4c016f4c4515c0926e260db8dfdd546b08e2ccb26564f960fbf4eccafcd562",
+    "diagnostics/rss-watchdog.json": "e8c62ed6ec5183c3bcb8c49117b7fb56556b817613726b405d68ed6ba2e6d8de",
+    "explanation.csv": "017e022bc5e1f95fc22ed17eba42ed48febd224aa9e633907ef98e5baf7c0610",
+    "failures.csv": "353131a782225db9852d4ffd64137600ce3c9118e7b58d4261eb302abc3ff7c1",
+    "falsification/visibility-delay.json": "a4fe156014e7d0a494de5fdd7bbbe14e8fe6387486f41670d38243590a75759e",
+    "gates/g12-3.json": "aa3608e64b76fe2ddb8cb4ce29edef733e1f778424e4c8e40a4eceb1668adb15",
+    "gates/g12-4.json": "cc3aa72521f1a61ec6559804083407801bc974256245bdba4b823b5d5b147d74",
+    "pareto.json": "008429ea409ea5fc197ba92020a4c68cd16db885c92cab07d9adf5a6ac1a2726",
+    "primary.csv": "a7d943d4aa3e0dab92822578d647b719b8aa59edfe7115fd548dfb5f7938ef30",
+    "provenance.json": "505d62e397beaac4523d41753a084a282786a8cf53fb80058722e977691d372f",
+    "sensitivities.csv": "a5881ea7644ad112e0eb1af7948267d1a057fbb08ec0a7cbedfbc3d99394736b"
+  },
+  "schema_version": "m12-final-manifest-v1"
+}

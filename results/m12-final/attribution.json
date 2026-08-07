@@ -1,0 +1,1356 @@
+{
+  "allocation_rule": "first divergent decision only; untraceable/non-additive is INTERACTION",
+  "overall_verdict": "COMPLETE",
+  "records": [
+    {
+      "after": "COMPUTE_BOUND-0.8x-DECODE_CAUSAL",
+      "after_decision_fingerprint": "2e1b225ab2ffba1af359516b9417396006d3b0245be6631e39c176ffb00fc0dc",
+      "arrival_scale": 0.8,
+      "before": "COMPUTE_BOUND-0.8x-PRICED_SPILL",
+      "before_decision_fingerprint": "4c88148db45f4013365c95a337cdd766a4d3f15836ba94de06b35a09b0fc005f",
+      "classification": "NO_CHANGE",
+      "delta": 0.0,
+      "first_divergent_decision": {
+        "after": {
+          "admission_action": "ADMIT",
+          "attempt_index": 0,
+          "debt_credits": 0,
+          "decision_kind": "DECODE",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "predicted_output_tokens": 128,
+          "reserved_credits": 128.0,
+          "sequence": 1
+        },
+        "before": null,
+        "change_type": "ADDED",
+        "decision_layer": "DECODE",
+        "index": 1,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "DECODE"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "COMPUTE_BOUND",
+      "single_switch": "DECODE_CREDITS"
+    },
+    {
+      "after": "COMPUTE_BOUND-0.8x-PRICED_SPILL",
+      "after_decision_fingerprint": "4c88148db45f4013365c95a337cdd766a4d3f15836ba94de06b35a09b0fc005f",
+      "arrival_scale": 0.8,
+      "before": "COMPUTE_BOUND-0.8x-BASELINE",
+      "before_decision_fingerprint": "b64978c332f32e8a326fa014a01fe4e7125f20c46ae44c9b332ae9346cb9fc75",
+      "classification": "ATTRIBUTED_FIRST_DIVERGENCE",
+      "delta": -0.0017267666666667125,
+      "first_divergent_decision": {
+        "after": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p1",
+          "sequence": 0,
+          "spill": false
+        },
+        "before": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p0",
+          "sequence": 0,
+          "spill": true
+        },
+        "change_type": "MODIFIED",
+        "decision_layer": "PLACEMENT",
+        "index": 0,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "PLACEMENT"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "COMPUTE_BOUND",
+      "single_switch": "PLACEMENT"
+    },
+    {
+      "after": "COMPUTE_BOUND-1.0x-DECODE_CAUSAL",
+      "after_decision_fingerprint": "11ba48f8bae936ccd2892cb7b97102c152c353f73e4c347d1c7f4eb446e561e3",
+      "arrival_scale": 1.0,
+      "before": "COMPUTE_BOUND-1.0x-PRICED_SPILL",
+      "before_decision_fingerprint": "985332faf32dc4b0a743d22c3a1faa1aa8d8b662e9c504cfa83680fb24412a8d",
+      "classification": "NO_CHANGE",
+      "delta": 0.0,
+      "first_divergent_decision": {
+        "after": {
+          "admission_action": "ADMIT",
+          "attempt_index": 0,
+          "debt_credits": 0,
+          "decision_kind": "DECODE",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "predicted_output_tokens": 128,
+          "reserved_credits": 128.0,
+          "sequence": 1
+        },
+        "before": null,
+        "change_type": "ADDED",
+        "decision_layer": "DECODE",
+        "index": 1,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "DECODE"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "COMPUTE_BOUND",
+      "single_switch": "DECODE_CREDITS"
+    },
+    {
+      "after": "COMPUTE_BOUND-1.0x-PRICED_SPILL",
+      "after_decision_fingerprint": "985332faf32dc4b0a743d22c3a1faa1aa8d8b662e9c504cfa83680fb24412a8d",
+      "arrival_scale": 1.0,
+      "before": "COMPUTE_BOUND-1.0x-BASELINE",
+      "before_decision_fingerprint": "26be1ad42cf92e9f886f750a5585e6716917ec05d8aedae9a9b4ac381592a555",
+      "classification": "ATTRIBUTED_FIRST_DIVERGENCE",
+      "delta": -0.001932766666666197,
+      "first_divergent_decision": {
+        "after": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p1",
+          "sequence": 0,
+          "spill": false
+        },
+        "before": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p0",
+          "sequence": 0,
+          "spill": true
+        },
+        "change_type": "MODIFIED",
+        "decision_layer": "PLACEMENT",
+        "index": 0,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "PLACEMENT"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "COMPUTE_BOUND",
+      "single_switch": "PLACEMENT"
+    },
+    {
+      "after": "COMPUTE_BOUND-1.2x-DECODE_CAUSAL",
+      "after_decision_fingerprint": "c1e537e608af3c7c608e4822e532e4ff2ff3bbeb45b3330ae248692b4501bdb4",
+      "arrival_scale": 1.2,
+      "before": "COMPUTE_BOUND-1.2x-PRICED_SPILL",
+      "before_decision_fingerprint": "02275208e2287b44e234f7e3b2560421a4e764c69e7da150a205da742e77a9c8",
+      "classification": "NO_CHANGE",
+      "delta": 0.0,
+      "first_divergent_decision": {
+        "after": {
+          "admission_action": "ADMIT",
+          "attempt_index": 0,
+          "debt_credits": 0,
+          "decision_kind": "DECODE",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "predicted_output_tokens": 128,
+          "reserved_credits": 128.0,
+          "sequence": 1
+        },
+        "before": null,
+        "change_type": "ADDED",
+        "decision_layer": "DECODE",
+        "index": 1,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "DECODE"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "COMPUTE_BOUND",
+      "single_switch": "DECODE_CREDITS"
+    },
+    {
+      "after": "COMPUTE_BOUND-1.2x-PRICED_SPILL",
+      "after_decision_fingerprint": "02275208e2287b44e234f7e3b2560421a4e764c69e7da150a205da742e77a9c8",
+      "arrival_scale": 1.2,
+      "before": "COMPUTE_BOUND-1.2x-BASELINE",
+      "before_decision_fingerprint": "bc4732f3aa9fe7890d6978d5b855e6696bae3476b26c618c04fcaed8c7ed8bd3",
+      "classification": "ATTRIBUTED_FIRST_DIVERGENCE",
+      "delta": -0.001932766666666197,
+      "first_divergent_decision": {
+        "after": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p1",
+          "sequence": 0,
+          "spill": false
+        },
+        "before": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p0",
+          "sequence": 0,
+          "spill": true
+        },
+        "change_type": "MODIFIED",
+        "decision_layer": "PLACEMENT",
+        "index": 0,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "PLACEMENT"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "COMPUTE_BOUND",
+      "single_switch": "PLACEMENT"
+    },
+    {
+      "after": "COMPUTE_BOUND-1.5x-DECODE_CAUSAL",
+      "after_decision_fingerprint": "b868f9dd9dc147e754fcbac300e3f784abd055528c04925a53f0a05649a3471c",
+      "arrival_scale": 1.5,
+      "before": "COMPUTE_BOUND-1.5x-PRICED_SPILL",
+      "before_decision_fingerprint": "df0f837e02c06971d52191bc1a8cc91f98fe0b5f158885dd9dec3fcb15f8c38a",
+      "classification": "NO_CHANGE",
+      "delta": 0.0,
+      "first_divergent_decision": {
+        "after": {
+          "admission_action": "ADMIT",
+          "attempt_index": 0,
+          "debt_credits": 0,
+          "decision_kind": "DECODE",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "predicted_output_tokens": 128,
+          "reserved_credits": 128.0,
+          "sequence": 1
+        },
+        "before": null,
+        "change_type": "ADDED",
+        "decision_layer": "DECODE",
+        "index": 1,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "DECODE"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "COMPUTE_BOUND",
+      "single_switch": "DECODE_CREDITS"
+    },
+    {
+      "after": "COMPUTE_BOUND-1.5x-PRICED_SPILL",
+      "after_decision_fingerprint": "df0f837e02c06971d52191bc1a8cc91f98fe0b5f158885dd9dec3fcb15f8c38a",
+      "arrival_scale": 1.5,
+      "before": "COMPUTE_BOUND-1.5x-BASELINE",
+      "before_decision_fingerprint": "4f54bf86e63f57910c2bf0f13a3c09566b7b03414248599f3799214c2f26d1c0",
+      "classification": "ATTRIBUTED_FIRST_DIVERGENCE",
+      "delta": -0.0019215666666658748,
+      "first_divergent_decision": {
+        "after": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p1",
+          "sequence": 0,
+          "spill": false
+        },
+        "before": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p0",
+          "sequence": 0,
+          "spill": true
+        },
+        "change_type": "MODIFIED",
+        "decision_layer": "PLACEMENT",
+        "index": 0,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "PLACEMENT"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "COMPUTE_BOUND",
+      "single_switch": "PLACEMENT"
+    },
+    {
+      "after": "COMPUTE_BOUND-2.0x-DECODE_CAUSAL",
+      "after_decision_fingerprint": "ecc87fd01bd5571a70f6cd9309af5e837b1fd6193ee1e8a9b146099bc2752c4d",
+      "arrival_scale": 2.0,
+      "before": "COMPUTE_BOUND-2.0x-PRICED_SPILL",
+      "before_decision_fingerprint": "dc324e82a9a607c498663b52e7eae6e8fa90418db878945cbffcda452af40e54",
+      "classification": "NO_CHANGE",
+      "delta": 0.0,
+      "first_divergent_decision": {
+        "after": {
+          "admission_action": "ADMIT",
+          "attempt_index": 0,
+          "debt_credits": 0,
+          "decision_kind": "DECODE",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "predicted_output_tokens": 128,
+          "reserved_credits": 128.0,
+          "sequence": 1
+        },
+        "before": null,
+        "change_type": "ADDED",
+        "decision_layer": "DECODE",
+        "index": 1,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "DECODE"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": false,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "COMPUTE_BOUND",
+      "single_switch": "DECODE_CREDITS"
+    },
+    {
+      "after": "COMPUTE_BOUND-2.0x-PRICED_SPILL",
+      "after_decision_fingerprint": "dc324e82a9a607c498663b52e7eae6e8fa90418db878945cbffcda452af40e54",
+      "arrival_scale": 2.0,
+      "before": "COMPUTE_BOUND-2.0x-BASELINE",
+      "before_decision_fingerprint": "b3770a6ead3ee781a8ce99d2ae43d99d92572748fc05fc696e2bda72034e5cee",
+      "classification": "ATTRIBUTED_FIRST_DIVERGENCE",
+      "delta": -0.0033412999999997695,
+      "first_divergent_decision": {
+        "after": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p1",
+          "sequence": 0,
+          "spill": false
+        },
+        "before": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p0",
+          "sequence": 0,
+          "spill": true
+        },
+        "change_type": "MODIFIED",
+        "decision_layer": "PLACEMENT",
+        "index": 0,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "PLACEMENT"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": false,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "COMPUTE_BOUND",
+      "single_switch": "PLACEMENT"
+    },
+    {
+      "after": "MEMORY_BOUND-0.8x-DECODE_CAUSAL",
+      "after_decision_fingerprint": "cc2c3e4c5f517cbe5277b34318bfb0701c452bc3d28d304ad866ead330bddfa3",
+      "arrival_scale": 0.8,
+      "before": "MEMORY_BOUND-0.8x-PRICED_SPILL",
+      "before_decision_fingerprint": "14dae1b675582ef5b7fd4195d620ab8fe5088430c958039b5152df87d0b6541b",
+      "classification": "NO_CHANGE",
+      "delta": 0.0,
+      "first_divergent_decision": {
+        "after": {
+          "admission_action": "ADMIT",
+          "attempt_index": 0,
+          "debt_credits": 0,
+          "decision_kind": "DECODE",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "predicted_output_tokens": 128,
+          "reserved_credits": 179.2,
+          "sequence": 1
+        },
+        "before": null,
+        "change_type": "ADDED",
+        "decision_layer": "DECODE",
+        "index": 1,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "DECODE"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MEMORY_BOUND",
+      "single_switch": "DECODE_CREDITS"
+    },
+    {
+      "after": "MEMORY_BOUND-0.8x-PRICED_SPILL",
+      "after_decision_fingerprint": "14dae1b675582ef5b7fd4195d620ab8fe5088430c958039b5152df87d0b6541b",
+      "arrival_scale": 0.8,
+      "before": "MEMORY_BOUND-0.8x-BASELINE",
+      "before_decision_fingerprint": "75d7396268730d7ca8670426e42bf5352b3f899cd6c3f4a01a4373ad6847857c",
+      "classification": "ATTRIBUTED_FIRST_DIVERGENCE",
+      "delta": -0.0023549666666671243,
+      "first_divergent_decision": {
+        "after": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p1",
+          "sequence": 0,
+          "spill": false
+        },
+        "before": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p0",
+          "sequence": 0,
+          "spill": true
+        },
+        "change_type": "MODIFIED",
+        "decision_layer": "PLACEMENT",
+        "index": 0,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "PLACEMENT"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": false,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MEMORY_BOUND",
+      "single_switch": "PLACEMENT"
+    },
+    {
+      "after": "MEMORY_BOUND-1.0x-DECODE_CAUSAL",
+      "after_decision_fingerprint": "808131cbe27f811604b801df54d8babd30f4f69ca6b7f9a399f12327068991a5",
+      "arrival_scale": 1.0,
+      "before": "MEMORY_BOUND-1.0x-PRICED_SPILL",
+      "before_decision_fingerprint": "8309af3e42f8d2561d27ad68fca5c3d786af5ebf43cf21865432e464aae502ab",
+      "classification": "NO_CHANGE",
+      "delta": 0.0,
+      "first_divergent_decision": {
+        "after": {
+          "admission_action": "ADMIT",
+          "attempt_index": 0,
+          "debt_credits": 0,
+          "decision_kind": "DECODE",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "predicted_output_tokens": 128,
+          "reserved_credits": 179.2,
+          "sequence": 1
+        },
+        "before": null,
+        "change_type": "ADDED",
+        "decision_layer": "DECODE",
+        "index": 1,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "DECODE"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MEMORY_BOUND",
+      "single_switch": "DECODE_CREDITS"
+    },
+    {
+      "after": "MEMORY_BOUND-1.0x-PRICED_SPILL",
+      "after_decision_fingerprint": "8309af3e42f8d2561d27ad68fca5c3d786af5ebf43cf21865432e464aae502ab",
+      "arrival_scale": 1.0,
+      "before": "MEMORY_BOUND-1.0x-BASELINE",
+      "before_decision_fingerprint": "12106ee7b07fd2d54fb41db1ec1fa25fc979d8f52b1b6691197b9c8ca2d599d4",
+      "classification": "ATTRIBUTED_FIRST_DIVERGENCE",
+      "delta": -0.0023549666666671243,
+      "first_divergent_decision": {
+        "after": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p1",
+          "sequence": 0,
+          "spill": false
+        },
+        "before": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p0",
+          "sequence": 0,
+          "spill": true
+        },
+        "change_type": "MODIFIED",
+        "decision_layer": "PLACEMENT",
+        "index": 0,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "PLACEMENT"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": false,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MEMORY_BOUND",
+      "single_switch": "PLACEMENT"
+    },
+    {
+      "after": "MEMORY_BOUND-1.2x-DECODE_CAUSAL",
+      "after_decision_fingerprint": "2f46754feac2044e21e634fbdd67a5aa9380b1fc6a8399c34e92a6c7dffeb305",
+      "arrival_scale": 1.2,
+      "before": "MEMORY_BOUND-1.2x-PRICED_SPILL",
+      "before_decision_fingerprint": "e0c0714f645c4a7021bb794341f53d5eb5334da52fdc93982cb057b16bfc4a84",
+      "classification": "NO_CHANGE",
+      "delta": 0.0,
+      "first_divergent_decision": {
+        "after": {
+          "admission_action": "ADMIT",
+          "attempt_index": 0,
+          "debt_credits": 0,
+          "decision_kind": "DECODE",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "predicted_output_tokens": 128,
+          "reserved_credits": 179.2,
+          "sequence": 1
+        },
+        "before": null,
+        "change_type": "ADDED",
+        "decision_layer": "DECODE",
+        "index": 1,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "DECODE"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MEMORY_BOUND",
+      "single_switch": "DECODE_CREDITS"
+    },
+    {
+      "after": "MEMORY_BOUND-1.2x-PRICED_SPILL",
+      "after_decision_fingerprint": "e0c0714f645c4a7021bb794341f53d5eb5334da52fdc93982cb057b16bfc4a84",
+      "arrival_scale": 1.2,
+      "before": "MEMORY_BOUND-1.2x-BASELINE",
+      "before_decision_fingerprint": "a6b4cce25f9dec307dda4084c02271de7c5f8fcc7c325dfd495bf077c6c6023b",
+      "classification": "ATTRIBUTED_FIRST_DIVERGENCE",
+      "delta": -0.0023549666666671243,
+      "first_divergent_decision": {
+        "after": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p1",
+          "sequence": 0,
+          "spill": false
+        },
+        "before": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p0",
+          "sequence": 0,
+          "spill": true
+        },
+        "change_type": "MODIFIED",
+        "decision_layer": "PLACEMENT",
+        "index": 0,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "PLACEMENT"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": false,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MEMORY_BOUND",
+      "single_switch": "PLACEMENT"
+    },
+    {
+      "after": "MEMORY_BOUND-1.5x-DECODE_CAUSAL",
+      "after_decision_fingerprint": "657e18c1f8bd7599320a811961141b8b54a0aca8c3cb3e54d221b4c3eee51b5b",
+      "arrival_scale": 1.5,
+      "before": "MEMORY_BOUND-1.5x-PRICED_SPILL",
+      "before_decision_fingerprint": "9a47a2f87e2bf6382df9b47f6302a9d6e388612867c3ec42c6e47551a872b94c",
+      "classification": "NO_CHANGE",
+      "delta": 0.0,
+      "first_divergent_decision": {
+        "after": {
+          "admission_action": "ADMIT",
+          "attempt_index": 0,
+          "debt_credits": 0,
+          "decision_kind": "DECODE",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "predicted_output_tokens": 128,
+          "reserved_credits": 179.2,
+          "sequence": 1
+        },
+        "before": null,
+        "change_type": "ADDED",
+        "decision_layer": "DECODE",
+        "index": 1,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "DECODE"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MEMORY_BOUND",
+      "single_switch": "DECODE_CREDITS"
+    },
+    {
+      "after": "MEMORY_BOUND-1.5x-PRICED_SPILL",
+      "after_decision_fingerprint": "9a47a2f87e2bf6382df9b47f6302a9d6e388612867c3ec42c6e47551a872b94c",
+      "arrival_scale": 1.5,
+      "before": "MEMORY_BOUND-1.5x-BASELINE",
+      "before_decision_fingerprint": "e96ab56bd0d85bd9e382b8a74eaa7c2be0349fa13fc86482fb1963707db827af",
+      "classification": "ATTRIBUTED_FIRST_DIVERGENCE",
+      "delta": -0.0023549666666671243,
+      "first_divergent_decision": {
+        "after": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p1",
+          "sequence": 0,
+          "spill": false
+        },
+        "before": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p0",
+          "sequence": 0,
+          "spill": true
+        },
+        "change_type": "MODIFIED",
+        "decision_layer": "PLACEMENT",
+        "index": 0,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "PLACEMENT"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": false,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MEMORY_BOUND",
+      "single_switch": "PLACEMENT"
+    },
+    {
+      "after": "MEMORY_BOUND-2.0x-DECODE_CAUSAL",
+      "after_decision_fingerprint": "6f3efa82c687650c51941c89af049f1cec13f1f83dc8e37f691a247266a433fb",
+      "arrival_scale": 2.0,
+      "before": "MEMORY_BOUND-2.0x-PRICED_SPILL",
+      "before_decision_fingerprint": "55b691b336f699bdd0cc55d30ef1d9118337255718d435027c0d6e9a9833af5a",
+      "classification": "NO_CHANGE",
+      "delta": 0.0,
+      "first_divergent_decision": {
+        "after": {
+          "admission_action": "ADMIT",
+          "attempt_index": 0,
+          "debt_credits": 0,
+          "decision_kind": "DECODE",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "predicted_output_tokens": 128,
+          "reserved_credits": 179.2,
+          "sequence": 1
+        },
+        "before": null,
+        "change_type": "ADDED",
+        "decision_layer": "DECODE",
+        "index": 1,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "DECODE"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MEMORY_BOUND",
+      "single_switch": "DECODE_CREDITS"
+    },
+    {
+      "after": "MEMORY_BOUND-2.0x-PRICED_SPILL",
+      "after_decision_fingerprint": "55b691b336f699bdd0cc55d30ef1d9118337255718d435027c0d6e9a9833af5a",
+      "arrival_scale": 2.0,
+      "before": "MEMORY_BOUND-2.0x-BASELINE",
+      "before_decision_fingerprint": "c88175af87b9ea47c3361e5ededa36cff692dc97437012dfcec687e70ec9cdb2",
+      "classification": "ATTRIBUTED_FIRST_DIVERGENCE",
+      "delta": -0.0022301333333327733,
+      "first_divergent_decision": {
+        "after": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p1",
+          "sequence": 0,
+          "spill": false
+        },
+        "before": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p0",
+          "sequence": 0,
+          "spill": true
+        },
+        "change_type": "MODIFIED",
+        "decision_layer": "PLACEMENT",
+        "index": 0,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "PLACEMENT"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": false,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MEMORY_BOUND",
+      "single_switch": "PLACEMENT"
+    },
+    {
+      "after": "MIXED-0.8x-DECODE_CAUSAL",
+      "after_decision_fingerprint": "9ec37a435b903021dfbb30eff6700e6cfe31d17ce3f2d7a73f2af0642338381d",
+      "arrival_scale": 0.8,
+      "before": "MIXED-0.8x-PRICED_SPILL",
+      "before_decision_fingerprint": "744a999d73162cfcc770e494cd01b76c9a31e38a4d45a50ba6becf06bd530112",
+      "classification": "NO_CHANGE",
+      "delta": 0.0,
+      "first_divergent_decision": {
+        "after": {
+          "admission_action": "ADMIT",
+          "attempt_index": 0,
+          "debt_credits": 0,
+          "decision_kind": "DECODE",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "predicted_output_tokens": 128,
+          "reserved_credits": 128.0,
+          "sequence": 1
+        },
+        "before": null,
+        "change_type": "ADDED",
+        "decision_layer": "DECODE",
+        "index": 1,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "DECODE"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MIXED",
+      "single_switch": "DECODE_CREDITS"
+    },
+    {
+      "after": "MIXED-0.8x-PRICED_SPILL",
+      "after_decision_fingerprint": "744a999d73162cfcc770e494cd01b76c9a31e38a4d45a50ba6becf06bd530112",
+      "arrival_scale": 0.8,
+      "before": "MIXED-0.8x-BASELINE",
+      "before_decision_fingerprint": "9eb9aa3c6bfd5d26888ca84575b78694de9f2e5d72e62c48c07cb755bc02d9b4",
+      "classification": "ATTRIBUTED_FIRST_DIVERGENCE",
+      "delta": 0.0016226333333335674,
+      "first_divergent_decision": {
+        "after": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p1",
+          "sequence": 0,
+          "spill": false
+        },
+        "before": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p0",
+          "sequence": 0,
+          "spill": true
+        },
+        "change_type": "MODIFIED",
+        "decision_layer": "PLACEMENT",
+        "index": 0,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "PLACEMENT"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MIXED",
+      "single_switch": "PLACEMENT"
+    },
+    {
+      "after": "MIXED-1.0x-DECODE_CAUSAL",
+      "after_decision_fingerprint": "4cd26f99156f30753ff36555d1b18a8b82c231a68b6a3f0f520fc7cf03030f24",
+      "arrival_scale": 1.0,
+      "before": "MIXED-1.0x-PRICED_SPILL",
+      "before_decision_fingerprint": "c5229703223da5735e7690b661514f6de6df6fa26b8dc189ef358250efcbee0e",
+      "classification": "NO_CHANGE",
+      "delta": 0.0,
+      "first_divergent_decision": {
+        "after": {
+          "admission_action": "ADMIT",
+          "attempt_index": 0,
+          "debt_credits": 0,
+          "decision_kind": "DECODE",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "predicted_output_tokens": 128,
+          "reserved_credits": 128.0,
+          "sequence": 1
+        },
+        "before": null,
+        "change_type": "ADDED",
+        "decision_layer": "DECODE",
+        "index": 1,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "DECODE"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MIXED",
+      "single_switch": "DECODE_CREDITS"
+    },
+    {
+      "after": "MIXED-1.0x-PRICED_SPILL",
+      "after_decision_fingerprint": "c5229703223da5735e7690b661514f6de6df6fa26b8dc189ef358250efcbee0e",
+      "arrival_scale": 1.0,
+      "before": "MIXED-1.0x-BASELINE",
+      "before_decision_fingerprint": "00af74740dd608a29f4e427b818bf8b2dff7b0d131596969d0acf453ca6a1a29",
+      "classification": "ATTRIBUTED_FIRST_DIVERGENCE",
+      "delta": 0.0016226333333335674,
+      "first_divergent_decision": {
+        "after": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p1",
+          "sequence": 0,
+          "spill": false
+        },
+        "before": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p0",
+          "sequence": 0,
+          "spill": true
+        },
+        "change_type": "MODIFIED",
+        "decision_layer": "PLACEMENT",
+        "index": 0,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "PLACEMENT"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MIXED",
+      "single_switch": "PLACEMENT"
+    },
+    {
+      "after": "MIXED-1.2x-DECODE_CAUSAL",
+      "after_decision_fingerprint": "03b2eb56d48b7f254abdd559667482c47fc5b187c2c2ca6d7cb94273fcd1ebaa",
+      "arrival_scale": 1.2,
+      "before": "MIXED-1.2x-PRICED_SPILL",
+      "before_decision_fingerprint": "14c016f4d8fb4896b8d9f75a4957abd4de638e0be2c84c98ad05e9c7b909d850",
+      "classification": "NO_CHANGE",
+      "delta": 0.0,
+      "first_divergent_decision": {
+        "after": {
+          "admission_action": "ADMIT",
+          "attempt_index": 0,
+          "debt_credits": 0,
+          "decision_kind": "DECODE",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "predicted_output_tokens": 128,
+          "reserved_credits": 128.0,
+          "sequence": 1
+        },
+        "before": null,
+        "change_type": "ADDED",
+        "decision_layer": "DECODE",
+        "index": 1,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "DECODE"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MIXED",
+      "single_switch": "DECODE_CREDITS"
+    },
+    {
+      "after": "MIXED-1.2x-PRICED_SPILL",
+      "after_decision_fingerprint": "14c016f4d8fb4896b8d9f75a4957abd4de638e0be2c84c98ad05e9c7b909d850",
+      "arrival_scale": 1.2,
+      "before": "MIXED-1.2x-BASELINE",
+      "before_decision_fingerprint": "b76aff13ef56350dcb9807e312d9fe30891661021629c336ebc9fa0b901c68a0",
+      "classification": "ATTRIBUTED_FIRST_DIVERGENCE",
+      "delta": 0.0016226333333326792,
+      "first_divergent_decision": {
+        "after": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p1",
+          "sequence": 0,
+          "spill": false
+        },
+        "before": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p0",
+          "sequence": 0,
+          "spill": true
+        },
+        "change_type": "MODIFIED",
+        "decision_layer": "PLACEMENT",
+        "index": 0,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "PLACEMENT"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MIXED",
+      "single_switch": "PLACEMENT"
+    },
+    {
+      "after": "MIXED-1.5x-DECODE_CAUSAL",
+      "after_decision_fingerprint": "16420419c6b8b1cc837f9786b2c00dc66acc1d3dbb552c80031581cf109a034d",
+      "arrival_scale": 1.5,
+      "before": "MIXED-1.5x-PRICED_SPILL",
+      "before_decision_fingerprint": "b1cf987edbbd22625cd059d9f3f0fde8a1f7a0b72bb9835145c7d14fdac1f0ae",
+      "classification": "ATTRIBUTED_FIRST_DIVERGENCE",
+      "delta": -0.4377142000000003,
+      "first_divergent_decision": {
+        "after": {
+          "admission_action": "ADMIT",
+          "attempt_index": 0,
+          "debt_credits": 128.0,
+          "decision_kind": "DECODE",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "predicted_output_tokens": 128,
+          "reserved_credits": 128.0,
+          "sequence": 1
+        },
+        "before": null,
+        "change_type": "ADDED",
+        "decision_layer": "DECODE",
+        "index": 1,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "DECODE"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": false,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MIXED",
+      "single_switch": "DECODE_CREDITS"
+    },
+    {
+      "after": "MIXED-1.5x-PRICED_SPILL",
+      "after_decision_fingerprint": "b1cf987edbbd22625cd059d9f3f0fde8a1f7a0b72bb9835145c7d14fdac1f0ae",
+      "arrival_scale": 1.5,
+      "before": "MIXED-1.5x-BASELINE",
+      "before_decision_fingerprint": "a4c7c6c0e9b571513dac76d444d109210f0dd8dbfd84cc17e042dc4f90e712a3",
+      "classification": "ATTRIBUTED_FIRST_DIVERGENCE",
+      "delta": 0.0016226333333335674,
+      "first_divergent_decision": {
+        "after": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p1",
+          "sequence": 0,
+          "spill": false
+        },
+        "before": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p0",
+          "sequence": 0,
+          "spill": true
+        },
+        "change_type": "MODIFIED",
+        "decision_layer": "PLACEMENT",
+        "index": 0,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "PLACEMENT"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MIXED",
+      "single_switch": "PLACEMENT"
+    },
+    {
+      "after": "MIXED-2.0x-DECODE_CAUSAL",
+      "after_decision_fingerprint": "ba0b8f10af2103c0e089710afaf8f52750d70e2c653572c542ac29699697476d",
+      "arrival_scale": 2.0,
+      "before": "MIXED-2.0x-PRICED_SPILL",
+      "before_decision_fingerprint": "bca50c422bb731774a14e913f33799ae6842891d55c85ad9cb857939c9c1ee75",
+      "classification": "NO_CHANGE",
+      "delta": 0.0,
+      "first_divergent_decision": {
+        "after": {
+          "admission_action": "ADMIT",
+          "attempt_index": 0,
+          "debt_credits": 0,
+          "decision_kind": "DECODE",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "predicted_output_tokens": 128,
+          "reserved_credits": 128.0,
+          "sequence": 1
+        },
+        "before": null,
+        "change_type": "ADDED",
+        "decision_layer": "DECODE",
+        "index": 1,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "DECODE"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MIXED",
+      "single_switch": "DECODE_CREDITS"
+    },
+    {
+      "after": "MIXED-2.0x-PRICED_SPILL",
+      "after_decision_fingerprint": "bca50c422bb731774a14e913f33799ae6842891d55c85ad9cb857939c9c1ee75",
+      "arrival_scale": 2.0,
+      "before": "MIXED-2.0x-BASELINE",
+      "before_decision_fingerprint": "bb181ab41982b126cfb3a75619a7031349b8e7185d4a8a0ddfadc4da75d38b78",
+      "classification": "ATTRIBUTED_FIRST_DIVERGENCE",
+      "delta": 0.0018462333333335579,
+      "first_divergent_decision": {
+        "after": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p1",
+          "sequence": 0,
+          "spill": false
+        },
+        "before": {
+          "attempt_index": 0,
+          "components": {
+            "decode_queue_work": 0.0,
+            "prefill_queue_work": 0.0
+          },
+          "decision_kind": "PLACEMENT",
+          "decision_time_work": 0.0,
+          "logical_id": "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          "node": "p0",
+          "sequence": 0,
+          "spill": true
+        },
+        "change_type": "MODIFIED",
+        "decision_layer": "PLACEMENT",
+        "index": 0,
+        "key": [
+          "trace:b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711:00000000000000000000",
+          0,
+          "PLACEMENT"
+        ]
+      },
+      "gate_rerun": {
+        "after_eligible": true,
+        "before_eligible": true
+      },
+      "metric": "strict_goodput",
+      "regime": "MIXED",
+      "single_switch": "PLACEMENT"
+    }
+  ]
+}

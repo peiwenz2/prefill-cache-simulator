@@ -1,0 +1,12 @@
+{
+  "aborted_cell_id": null,
+  "hard_limit_bytes": 1610612736,
+  "hard_limit_exceeded": false,
+  "last_rss_bytes": 770330624,
+  "peak_rss_bytes": 1061490688,
+  "poll_interval_seconds": 0.1,
+  "reader_error": null,
+  "schema_version": "m12-rss-watchdog-v1",
+  "soft_limit_bytes": 1073741824,
+  "soft_limit_exceeded": false
+}

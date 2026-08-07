@@ -266,7 +266,7 @@
       <div class="hero">
         <div class="pills">
           <span class="pill">Evidence Review</span
-          ><span class="pill">M12 Running</span
+          ><span class="pill">M12 Complete</span
           ><span class="pill">零背景讲解版</span
           ><span class="pill">作者：张珮文</span>
         </div>
@@ -279,8 +279,8 @@
           lifecycle。每个策略都回答：代码在哪里、决策怎么走、收益为何出现、在哪些条件下会失败。
         </p>
         <div class="evidence">
-          证据版本：prefill-cache-sim@51e7aea ｜ 2026-08-07 ｜ M12 final grid
-          正在运行；未完成结果不进入结论
+          证据版本：prefill-cache-sim@205353a ｜ 2026-08-08 ｜ M12 final grid
+          54／54 cells 完成，0 failure；MANIFEST SHA-256：89d4fb8d26a400d03a33538f2d889d2a3feb3bdf963ea219663d6e2004a69140
         </div>
       </div>
     </header>
@@ -1493,9 +1493,8 @@ cost(node) = queue_cost
           <div class="call warn">
             <div class="label">当前 verdict</div>
             PricedSpill 旧 grid 是 13 个 KILL_ENFORCEMENT＋2 个 provisional
-            duplicate pass，只保留 shadow／ablation。KVS contention 修复后的 M12
-            final grid 尚未完成；框架值得继续，当前价格函数未过 enforcement
-            gate。
+            duplicate pass，只保留 shadow／ablation。修复后的 M12 final grid
+            已完成，但没有把价格函数升级为可 enforcement；框架值得继续，当前价格函数仍未过 gate。
           </div>
           <div class="figure">
             <svg
@@ -1542,7 +1541,7 @@ cost(node) = queue_cost
                   stroke-dasharray="5 3"
                 />
                 <text x="700" y="226" fill="#b91c1c">
-                  57.07% infinite single-global ceiling
+                  57.07% infinite single-global token ceiling
                 </text>
               </g>
             </svg>
@@ -2002,8 +2001,8 @@ if move_score - keep_score &gt; safety_margin: abort_self
               <tr>
                 <td>线 C 并行</td>
                 <td>M12.2–M12.5</td>
-                <td class="risk">已设计</td>
-                <td>Priced Spill／Decode Credits／eviction 的多维 Pareto</td>
+                <td class="best">COMPLETE</td>
+                <td>45 primary＋9 sensitivity；Pareto／attribution／gate 全部生成</td>
               </tr>
               <tr>
                 <td>defer</td>
@@ -2019,7 +2018,61 @@ if move_score - keep_score &gt; safety_margin: abort_self
               </tr>
             </tbody>
           </table>
-          <h3>5.1 Kill／narrow criteria</h3>
+          <h3>5.1 M12 final：54 个 cell 最终说明了什么</h3>
+          <div class="call">
+            <div class="label">一句话结论</div>
+            M12 不是“Decode gate 获胜”的证明，而是一次完整的 falsification：
+            <strong>只追 cache hit 会输掉 completed goodput</strong>。在 MIXED 1.5×，
+            Decode Causal 把 token hit 从 Priced Spill 的 57.06% 提到 76.11%；
+            strict output goodput 则相对同一修复代码重跑的 Decode No-Gate
+            从 0.14036 降到 0.12696，下降 9.55%。
+          </div>
+          <svg role="img" aria-label="M12 从请求到多维验收门的流程图" viewBox="0 0 980 210">
+            <defs><marker id="m12-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#64748b"/></marker></defs>
+            <g fill="#eef2ff" stroke="#4338ca" stroke-width="2">
+              <rect x="20" y="64" width="150" height="76" rx="12"/><rect x="220" y="64" width="160" height="76" rx="12"/>
+              <rect x="430" y="64" width="160" height="76" rx="12"/><rect x="640" y="64" width="150" height="76" rx="12"/>
+              <rect x="840" y="64" width="120" height="76" rx="12"/>
+            </g>
+            <g font-size="15" text-anchor="middle" fill="#172033">
+              <text x="95" y="94">Frozen trace</text><text x="95" y="118">23,608 requests</text>
+              <text x="300" y="94">Placement</text><text x="300" y="118">Baseline／Priced Spill</text>
+              <text x="510" y="94">Decode lifecycle</text><text x="510" y="118">credits／retry／gate</text>
+              <text x="715" y="94">统一记账</text><text x="715" y="118">work／SLO／fairness</text>
+              <text x="900" y="94">Gate</text><text x="900" y="118">pass／narrow／kill</text>
+            </g>
+            <g stroke="#64748b" stroke-width="2" marker-end="url(#m12-arrow)"><line x1="170" y1="102" x2="215" y2="102"/><line x1="380" y1="102" x2="425" y2="102"/><line x1="590" y1="102" x2="635" y2="102"/><line x1="790" y1="102" x2="835" y2="102"/></g>
+          </svg>
+          <table>
+            <thead><tr><th>MIXED 1.5×</th><th>Baseline</th><th>Priced Spill</th><th>Decode No-Gate</th><th>Decode Causal</th><th>怎么读</th></tr></thead>
+            <tbody>
+              <tr><td>Token hit</td><td>56.80%</td><td>57.06%</td><td>—</td><td><strong>76.11%</strong></td><td>No-Gate sensitivity 未发布 explanation row；不反推 hit</td></tr>
+              <tr><td>Strict output goodput</td><td>0.14034</td><td>0.14036</td><td><strong>0.14036</strong></td><td>0.12696</td><td>高 hit 没有转成更多 SLO 内输出</td></tr>
+              <tr><td>Queue p95，normalized work</td><td>5365.95</td><td>5360.22</td><td>—</td><td><strong>1503.10</strong></td><td>gate 确实压低队列，因此有 overload protection 价值</td></tr>
+              <tr><td>Minimum tier attainment</td><td>0.9358</td><td>0.9358</td><td>—</td><td>0.7531</td><td>严格 SLO tier 被伤害，fairness gate 不通过</td></tr>
+              <tr><td>Attempts／retries／gated</td><td>23,608／0／0</td><td>23,608／0／0</td><td>23,608／0／0</td><td>41,403／17,795／14,881</td><td>不能把 retry 产生的额外 hit 当免费收益</td></tr>
+            </tbody>
+          </table>
+          <h3>5.2 Gate verdict 与可以／不可以说的话</h3>
+          <table>
+            <thead><tr><th>Gate</th><th>最终 verdict</th><th>可发布结论</th><th>禁止结论</th></tr></thead>
+            <tbody>
+              <tr><td>G12-3 Decode</td><td class="risk">NARROW_OVERLOAD_ONLY</td><td>记账守恒；能降 queue；适合作为 overload-only pressure tool 继续硬件验证</td><td>不能说提高吞吐、提高公平性或可以常态部署</td></tr>
+              <tr><td>G12-4 Cluster eviction</td><td class="risk">KILL_OR_NARROW</td><td>当前 grid 没有 capacity-binding cells，结果完整但没有正向机制证据</td><td>不能说 eviction 策略优于 baseline</td></tr>
+              <tr><td>Pareto／attribution</td><td class="best">COMPLETE</td><td>15 个 regime×scale group 均有完整候选集判定；首次分歧可追踪</td><td>不能把 normalized result 写成生产 MFU／毫秒</td></tr>
+            </tbody>
+          </table>
+          <div class="grid2">
+            <div class="card"><div class="label">数据完整性</div><ul><li>45 primary＋9 sensitivity，0 failure。</li><li>45 constraints＋45 explanation＋45 visibility audit。</li><li>16 个 artifact hash 与 MANIFEST 全部匹配。</li></ul></div>
+            <div class="card"><div class="label">修复 provenance</div><ul><li>修复前 base 有 53 个 cell；新代码重跑缺失的 Decode Causal 与 No-Gate 对照，最终保留 52 个旧代码 cell。</li><li>4 个 retained samples 做 row＋decision fingerprint invariance。</li><li>头条 cell 来自 da59431 的 oversized reservation 串行化修复；混合来源与 affected-group recompute 写入 repair evidence。</li></ul></div>
+          </div>
+          <table>
+            <thead><tr><th>Visibility 字段</th><th>定义</th><th>为什么不矛盾</th></tr></thead>
+            <tbody><tr><td><code>decision_points_moved</code></td><td>探针方法属性：只延迟真值可见性，不移动原定决策时点</td><td>固定为 false</td></tr><tr><td><code>decision_sequence_unchanged</code></td><td>cell 测量结果：延迟视图后实际选择序列是否相同</td><td>可以为 false，表示信息延迟改变了选择</td></tr></tbody>
+          </table>
+          <p class="fine">空的 <code>crossovers.csv</code> 表示 15 个 regime×scale group 中没有 winner 切换，不是漏写；<code>retry_pressure_covered=true</code> 只由 MIXED 1.5× Decode Causal 这一格的 17,795 次 retry 支撑。</p>
+          <p class="fine">注意：0.14036 是本模拟器 frozen contract 下的 normalized strict output goodput，不是 requests／s，也不能与 M4 的 queue 数字或论文 TTFT 直接相除。57.07% 是 infinite single-global token ceiling；M12 的 per-node、finite-capacity、queue-aware 结果属于另一实验合同。</p>
+          <h3>5.3 Kill／narrow criteria</h3>
           <ol>
             <li>
               R1 若显示 production baseline headroom＜2 pp 且无 load-skew
@@ -2036,9 +2089,8 @@ if move_score - keep_score &gt; safety_margin: abort_self
               M12.2 epsilon 冻结为 hit 0.1pp、max／mean +0.05、P queue p95 +5%。
             </li>
             <li>
-              M12.3 的预注册条件：若在 1.5× overload、causal predictor 下 strict
-              goodput 增益低于 5%，则降为 overload-only；当前 final grid
-              未完成。
+              M12.3 已触发 narrow：MIXED 1.5× 下 strict output goodput 相对
+              no-gate 下降 9.55%，因此只保留 overload-only，不进入常态部署。
             </li>
             <li>
               normalized simulation 可以 kill；pass 只算 provisional。M12-HW

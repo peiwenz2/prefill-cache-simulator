@@ -1,7 +1,7 @@
 # Prefill Cache Simulator：策略价值与 benchmark 诚实性审计
 
 - 作者：张珮文
-- 证据版本：`prefill-cache-sim@51e7aea`；M12 final grid 正在运行，未完成结果不进入结论
+- 证据版本：`prefill-cache-sim@205353a`；M12 final grid 54／54 完成，0 failure；MANIFEST SHA-256 `89d4fb8d26a400d03a33538f2d889d2a3feb3bdf963ea219663d6e2004a69140`
 - 数据集：Mooncake `mooncake_trace.jsonl`，23,608 requests，512-token prefix blocks
 - 证据等级：论文原文＋本地 deterministic replay；真实 GPU／KVT／生产 shadow 仍未完成
 
@@ -323,7 +323,7 @@ M4 的可迁移 insight 是一条切换规则：**view 可信时追 cost score�
 | KVS | 无 remote | NORMAL／EXPENSIVE／DISABLED | S5/S6 在部分 cell 能 remote，但 score 未完整定价 transfer |
 | Candidate gate | alive nodes | cohort＋SLO eligibility | M12 所有策略先共享 prefilter |
 
-M12 已冻结的旧 placement artifact 只支持“在特定 COMPUTE_BOUND-DISABLED cell，S5 strict useful goodput=6.634、load=1.002，hit=56.794% 与 S4 的 56.788% 实质持平；S5 的明确优势在 goodput 与 P queue p95”。这里的 6.634 是 M12 自己的 normalized strict-useful-work rate，不能与 M6 的 0.4883 或 M7 的 0.14181 横比。它不能证明 S5 普适最佳，也不能与 M4 的 52.32% 直接作升降比较。当前 M12 final grid 正在运行；在完整 MANIFEST 与 gates 通过前，decode lease、census eviction、KVS contention 不发布收益结论。
+M12 已冻结的旧 placement artifact 只支持“在特定 COMPUTE_BOUND-DISABLED cell，S5 strict useful goodput=6.634、load=1.002，hit=56.794% 与 S4 的 56.788% 实质持平；S5 的明确优势在 goodput 与 P queue p95”。这里的 6.634 是 M12 自己的 normalized strict-useful-work rate，不能与 M6 的 0.4883 或 M7 的 0.14181 横比。它不能证明 S5 普适最佳，也不能与 M4 的 52.32% 直接作升降比较。最终 grid 已完成；G12-3 只保留 overload-only，G12-4 kill／narrow，KVS／Decode／eviction 均没有取得常态 enforcement 证据。
 
 #### 2.2.9 KVS／SLO-aware：从“找 hit”升级为“给每个选择定价”
 
@@ -344,7 +344,7 @@ request + model/adapter/work-shape + SLO slack
 
 Hybrid 使用 Mooncake 风格 threshold：只有 remote 方案相对 local recompute 的收益达到阈值才 transfer。PricedSpill 则把 transfer 直接放进统一 ledger。它的最大价值不是再多几个 hit points，而是允许 selector 在“粘住 cache 热点”和“打散后全部重算”之间选择第三条路：**把 KV 搬到空闲 node。**
 
-当前诚实结论：PricedSpill 的旧 G12-2 grid 为 13 个 `KILL_ENFORCEMENT`＋2 个 provisional duplicate pass，只能保留 shadow／ablation；KVS contention cell 曾经因实现问题没有产生因果差异，修复后的 final grid 尚未完成。因此统一成本框架值得继续，当前具体价格函数没有通过 enforcement gate。
+当前诚实结论：PricedSpill 的旧 G12-2 grid 为 13 个 `KILL_ENFORCEMENT`＋2 个 provisional duplicate pass，只能保留 shadow／ablation；修复后的 final grid 已完成，但没有把价格函数升级为可 enforcement。统一成本框架值得继续，当前具体价格函数仍未通过 enforcement gate。
 
 ### 2.3 Eviction：LRU 是 benchmark 主线，复杂策略是容量压力实验
 
@@ -482,9 +482,21 @@ S3 的 54.01% 距无限单池 token ceiling 57.07% 约 3.06 pp，但有限多节
 | freeze | D2 gate | upper-bound only | preemption 是否真的增加 completed goodput | Q5／Q6 与真实 resume 前不投入实现 |
 | 线 C 并行 | M12.0 reuse-time analyzer | `KILL_ROUTER_HOLD` | 3.05s bucket；5s 保守上界仅 0.1725%，低于 10% 约 58× | 停止 router hold；保留 placement locality／engine batching |
 | M12.1 | Metric contract v1.1 | ✅ 完成 | goodput／efficiency／KVS／fairness 不混口径 | frozen workload＋zero-attempt denominator＋work conservation |
-| M12.2–M12.5 | Goodput × Reuse | 已设计，未执行 | Priced Spill、Decode Credits、cluster eviction 是否改善 strict goodput | 多维 Pareto；不得只靠 hit 或降低 offered load |
+| M12.2–M12.5 | Goodput × Reuse | ✅ 54／54 完成 | Priced Spill、Decode Credits、cluster eviction 是否改善 strict goodput | G12-3 narrow；G12-4 kill／narrow；Pareto 与 attribution complete |
 
-### 5.1 Kill／narrow criteria
+### 5.1 M12 final：高 hit 为什么仍然失败
+
+MIXED 1.5× 是最关键反例：Decode Causal 的 token hit 从 Priced Spill 的 57.06% 提高到 76.11%，但 strict output goodput 相对同一修复代码重跑的 Decode No-Gate 从 0.14036 降到 0.12696，相对下降 9.55%。它把 queue p95 从 5360.22 降到 1503.10，却把 minimum tier attainment 从 0.9358 降到 0.7531，并产生 17,795 次 retry，其中 14,881 次被 gate。结论是：它能作为 overload pressure tool 继续验证，不能声称提高常态吞吐或公平性。
+
+| Gate | Verdict | 结论 |
+|---|---|---|
+| G12-3 | `NARROW_OVERLOAD_ONLY` | accounting 与 offered load 守恒，但 throughput／fairness 不通过 |
+| G12-4 | `KILL_OR_NARROW` | 没有 capacity-binding cells；不能声称 eviction 有收益 |
+| Pareto／attribution | `COMPLETE` | 15 个 regime×scale group 完整；normalized 结果仍不能写成生产 MFU／毫秒 |
+
+最终 artifact 包含 45 primary、9 sensitivity、0 failure、45 constraints、45 explanation 和 45 visibility rows；16 个 MANIFEST hash 全部匹配。修复前 base 有 53 个 cell；新代码重跑缺失的 Decode Causal 与 No-Gate 对照，最终保留 52 个旧代码 cell。4 个 retained samples 通过 row 与 decision fingerprint invariance；混合 provenance 与 recompute scope 均写入 evidence。`decision_points_moved=false` 是探针方法属性，表示不移动原定决策时点；`decision_sequence_unchanged=false` 是 cell 测量结果，表示延迟视图改变了实际选择，两者不矛盾。空的 `crossovers.csv` 表示没有 winner 切换，不是漏写。
+
+### 5.2 Kill／narrow criteria
 
 1. **WHERE line kill**：R1 若显示 production baseline 距可用 locality ceiling 小于 2 pp，且 load skew 没有可改善空间，关闭 selector enforcement 线；保留 lifecycle RFC。
 2. **S4 kill**：拿不到 privacy-safe real session key，S4 降为 research result；不把 prefix-family proxy 上线。

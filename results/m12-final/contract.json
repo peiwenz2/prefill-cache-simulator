@@ -1,0 +1,19 @@
+{
+  "arrival_scales": [
+    0.8,
+    1.0,
+    1.2,
+    1.5,
+    2.0
+  ],
+  "fixed_horizon": 30000000.0,
+  "oracle_deployable": false,
+  "primary_metric": "strict_useful_token_goodput",
+  "regimes": [
+    "COMPUTE_BOUND",
+    "MEMORY_BOUND",
+    "MIXED"
+  ],
+  "schema_version": "m12-final-contract-v1",
+  "truth_basis": "SYNTHETIC_TENANT_TIER_ON_TRACE"
+}
