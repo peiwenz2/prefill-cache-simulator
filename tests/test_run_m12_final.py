@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import subprocess
 import sys
+from collections import OrderedDict
 from dataclasses import replace
 from pathlib import Path
 
@@ -21,22 +23,27 @@ from prefill_cache_sim.m12_eviction import (
     ClusterCacheCensus,
     EvictionMode,
     M12EvictionConfig,
+    M12EvictionPolicy,
 )
 from prefill_cache_sim.m12_kernel import (
+    CacheMutation,
     CausalKernel,
+    CausalView,
     FrozenKernelCostModel,
     KernelConfig,
     KernelRequestSpec,
 )
-from prefill_cache_sim.m12_metrics import LogicalRequestSpec
+from prefill_cache_sim.m12_metrics import SERVICE_REGIMES, LogicalRequestSpec
 from prefill_cache_sim.m12_placement import M12PlacementPolicy, PlacementMode
 from scripts.run_m12_final import (
     ARRIVAL_SCALES,
     PRIMARY_STRATEGIES,
     CellResult,
     _attribution,
+    _CacheDigestLedger,
     _causal_hit_ceiling,
     _crossovers,
+    _DecisionLedgerPolicy,
     _DelayedCensus,
     _FinalEvictionPolicy,
     _first_decision_diff,
@@ -175,6 +182,159 @@ def test_artifacts_are_atomic_deterministic_and_load_workload_once(
         for cell in gate["cells"]
         if "ORACLE" in cell["strategy"]
     )
+
+
+def test_binding_probes_have_separate_progress_and_only_binding_cache_path(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import scripts.run_m12_final as runner
+
+    monkeypatch.setattr(
+        runner, "_build_artifacts", lambda *args, **kwargs: {"MANIFEST.json": b"{}"}
+    )
+    workload = (
+        KernelRequestSpec(
+            LogicalRequestSpec("a", "t", "STANDARD", 0, 1, 1), ("K",), (1,)
+        ),
+        KernelRequestSpec(
+            LogicalRequestSpec("b", "t", "STANDARD", 1, 1, 1), ("K",), (1,)
+        ),
+    )
+    calls: list[str] = []
+
+    def execute(_workload, cell):
+        calls.append(cell.cell_id)
+        result = fake_result(cell)
+        return replace(
+            result,
+            token_hit_rate=(0.4 if cell.regime == "MIXED" else 0.5),
+        )
+
+    run_artifacts(
+        tmp_path / "trace.jsonl",
+        tmp_path / "out",
+        executor=execute,
+        workload_loader=lambda _path: (workload, {"trace_sha256": "x"}),
+    )
+    progress = capsys.readouterr().err.splitlines()
+    assert progress[:15] == [
+        f"[probe {index}/15] {regime}-{scale:.1f}x"
+        for index, (regime, scale) in enumerate(
+            (
+                (item.regime_id.value, scale)
+                for item in SERVICE_REGIMES
+                for scale in ARRIVAL_SCALES
+            ),
+            start=1,
+        )
+    ]
+    assert calls.count("MIXED-0.8x-EVICTION_LRU") == 1
+    assert calls.count("COMPUTE_BOUND-0.8x-EVICTION_LRU") == 1
+    source = inspect.getsource(run_artifacts)
+    assert source.index("if is_binding:") < source.index(
+        "cached_results[probe.cell_id]"
+    )
+
+
+def test_cache_digest_is_order_independent_and_hashseed_stable(tmp_path: Path) -> None:
+    program = r'''
+from scripts.run_m12_final import _CacheDigestLedger
+from prefill_cache_sim.m12_kernel import CacheMutation
+import sys
+keys = tuple(sys.argv[1].split(','))
+ledger = _CacheDigestLedger()
+ledger.apply('p0', keys, frozenset(), CacheMutation(True))
+print(ledger.snapshot('p0'))
+'''
+    outputs = []
+    for seed, keys in (("1", "A,B,😀"), ("7", "😀,B,A")):
+        completed = subprocess.run(
+            [sys.executable, "-c", program, keys],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=dict(os.environ, PYTHONHASHSEED=seed, PYTHONPATH="src:."),
+        )
+        outputs.append(completed.stdout.strip())
+    assert outputs[0] == outputs[1]
+
+
+def test_cache_digest_updates_without_raw_snapshot_or_occupancy_scan() -> None:
+    ledger = _CacheDigestLedger()
+    ledger.apply("p0", ("A", "B"), frozenset(), CacheMutation(True))
+    before = ledger.snapshot("p0")
+    ledger.apply(
+        "p0", ("C",), frozenset({"A", "B"}), CacheMutation(True, ("A",))
+    )
+    after = ledger.snapshot("p0")
+    assert before[0] == after[0] == 2
+    assert before[1] != after[1]
+    source = inspect.getsource(_CacheDigestLedger)
+    assert "sorted(" not in source
+    assert "set(resident" not in source
+    assert "census_input_keys" not in inspect.getsource(_DecisionLedgerPolicy)
+
+
+def test_census_age_is_measured_from_actual_refresh_at_decision() -> None:
+    workload = tuple(
+        KernelRequestSpec(
+            LogicalRequestSpec(str(index), "t", "STANDARD", index * 0.2, 1, 1),
+            (chr(ord("A") + index),),
+            (1,),
+        )
+        for index in range(8)
+    )
+    cell = next(
+        item
+        for item in build_cell_plan({("MIXED", 1.5)})
+        if item.strategy == "CENSUS_EVICTION"
+    )
+    result = execute_cell(workload, cell, visibility_delay_work=2)
+    decisions = [
+        json.loads(item)
+        for item in result.decision_log
+        if json.loads(item)["decision_kind"] == "EVICTION"
+    ]
+    measured = [
+        item["decision_time_work"] - item["census_refreshed_at_work"]
+        for item in decisions
+        if item["census_refreshed_at_work"] is not None
+    ]
+    assert measured
+    assert [
+        item["census_age_work"]
+        for item in decisions
+        if item["census_refreshed_at_work"] is not None
+    ] == pytest.approx(measured)
+    assert result.census_age_work == pytest.approx(max(measured))
+    assert result.census_age_work != result.visibility_delay_work
+
+
+def test_same_victims_different_census_digest_is_first_divergence() -> None:
+    def record(digest: str) -> str:
+        return json.dumps(
+            {
+                "logical_id": "r",
+                "attempt_index": 0,
+                "decision_kind": "EVICTION",
+                "decision_time_work": 1,
+                "sequence": 0,
+                "victims": ["V"],
+                "census_input_count": 2,
+                "census_input_digest": digest,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    divergence = _first_decision_diff((record("a"),), (record("b"),))
+    assert divergence is not None
+    assert divergence["before"]["victims"] == divergence["after"]["victims"]
+    assert divergence["before"]["census_input_digest"] != divergence["after"][
+        "census_input_digest"
+    ]
 
 
 def test_runner_refuses_empty_or_nonfinite_results(tmp_path: Path) -> None:
@@ -418,6 +578,68 @@ def test_delayed_census_remove_cancels_pending_add_and_refresh() -> None:
     census.observe("k", "c", "p0", at_work=16, recovery_work=2)
     census.remove("k", "c", "p0")
     assert census.lookup("k", "c", now_work=30) is None
+
+
+def test_delayed_census_age_ignores_future_pending_refresh() -> None:
+    census = _DelayedCensus(CensusConfig(8, 100), 5)
+    census.observe("k", "c", "p0", at_work=0, recovery_work=1)
+    assert census.lookup("k", "c", now_work=5) is not None
+    assert census.latest_visible_snapshot_work == 0
+
+    census.observe("k", "c", "p0", at_work=10, recovery_work=2)
+    assert census.lookup("k", "c", now_work=12) is not None
+    assert 12 - census.latest_visible_snapshot_work == 12
+
+    assert census.lookup("k", "c", now_work=15) is not None
+    assert census.latest_visible_snapshot_work == 10
+    assert 15 - census.latest_visible_snapshot_work == 5
+
+
+def test_eviction_mutation_uses_immutable_resident_without_full_copy() -> None:
+    source = inspect.getsource(M12EvictionPolicy.cache_mutation)
+    assert "set(view.cache_by_node" not in source
+    assert "resident | additions" not in source
+
+    class CountingLru(OrderedDict[str, None]):
+        iterations = 0
+
+        def __iter__(self):
+            for key in super().__iter__():
+                self.iterations += 1
+                yield key
+
+    keys = tuple(f"K-{index}" for index in range(10_000))
+    resident = frozenset(keys)
+    request = KernelRequestSpec(
+        LogicalRequestSpec("new", "t", "STANDARD", 0, 1, 1),
+        ("NEW",),
+        (1,),
+    )
+    placement = M12PlacementPolicy(
+        PlacementMode.PRICED_SPILL,
+        FrozenKernelCostModel(1, 0, 0, 1),
+        kvs_enabled=False,
+    )
+    policy = M12EvictionPolicy(
+        placement,
+        M12EvictionConfig(EvictionMode.LRU, len(keys), 1, 0, {}),
+        ClusterCacheCensus(CensusConfig(len(keys) + 1, 100)),
+        cache_key_cohorts={**dict.fromkeys(keys, "c"), "NEW": "c"},
+    )
+    lru = CountingLru.fromkeys(keys)
+    policy._lru["p0"] = lru
+    view = CausalView(
+        0,
+        resident,
+        {"p0": 0},
+        {"d0": 0},
+        {"p0": resident},
+        {"p0": 0},
+    )
+    attempt = next(iter(placement.plan_attempts(request, view)))
+    mutation = policy.cache_mutation(request, attempt, view)
+    assert mutation.evict_keys == (keys[0],)
+    assert lru.iterations == 1
 
 
 def test_delayed_census_same_time_remove_then_add_is_deterministic() -> None:

@@ -223,18 +223,29 @@ def run_artifacts(
         hit_ceiling = _causal_hit_ceiling(workload)
         discovered_hit_ceiling = hit_ceiling
         binding = set()
-        for regime in (item.regime_id.value for item in SERVICE_REGIMES):
-            for scale in ARRIVAL_SCALES:
-                probe = FinalCell(regime, scale, "EVICTION_LRU", "PRIMARY")
-                result = execute(workload, probe)
-                is_binding = hit_ceiling - result.token_hit_rate >= 0.03
+        probes = tuple(
+            (regime, scale)
+            for regime in (item.regime_id.value for item in SERVICE_REGIMES)
+            for scale in ARRIVAL_SCALES
+        )
+        for probe_index, (regime, scale) in enumerate(probes, start=1):
+            print(
+                f"[probe {probe_index}/{len(probes)}] {regime}-{scale:.1f}x",
+                file=sys.stderr,
+                flush=True,
+            )
+            probe = FinalCell(regime, scale, "EVICTION_LRU", "PRIMARY")
+            result = execute(workload, probe)
+            is_binding = hit_ceiling - result.token_hit_rate >= 0.03
+            if is_binding:
+                binding.add((regime, scale))
                 cached_results[probe.cell_id] = replace(
                     result,
-                    capacity_binding=is_binding,
+                    capacity_binding=True,
                     hit_ceiling=hit_ceiling,
                 )
-                if is_binding:
-                    binding.add((regime, scale))
+            else:
+                del result
     else:
         binding = set(binding_cells)
     plan = build_cell_plan(binding)
@@ -302,10 +313,6 @@ def with_visibility_delay(
 
 class _FinalEvictionPolicy(M12EvictionPolicy):
     """Eviction owns mutation; all decode lifecycle hooks stay composed."""
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.eviction_decisions: list[dict[str, object]] = []
 
     def plan_attempts(
         self, request: KernelRequestSpec, view: CausalView
@@ -381,18 +388,48 @@ class _FinalEvictionPolicy(M12EvictionPolicy):
         view: CausalView,
     ) -> CacheMutation:
         self.placement.cache_mutation(request, attempt, view)
-        mutation = super().cache_mutation(request, attempt, view)
-        self.eviction_decisions.append(
-            {
-                "logical_id": request.logical.logical_request_id,
-                "attempt_index": attempt.attempt_index,
-                "decision_kind": "EVICTION",
-                "victims": list(mutation.evict_keys),
-                "census_age_work": getattr(self.census, "delay_work", 0.0),
-                "census_input_keys": sorted(view.cache_by_node[attempt.p_node_id]),
-            }
+        return super().cache_mutation(request, attempt, view)
+
+
+class _CacheDigestLedger:
+    """Order-independent O(1)-per-key digest without retaining cache identities."""
+
+    _DOMAIN = b"m12-census-input-v1\x00"
+
+    def __init__(self) -> None:
+        self._counts: dict[str, int] = {}
+        self._digests: dict[str, int] = {}
+
+    @classmethod
+    def _key_digest(cls, key: str) -> int:
+        return int.from_bytes(
+            hashlib.sha256(cls._DOMAIN + key.encode("utf-8")).digest(), "big"
         )
-        return mutation
+
+    def snapshot(self, node: str) -> tuple[int, str]:
+        return self._counts.get(node, 0), f"{self._digests.get(node, 0):064x}"
+
+    def apply(
+        self,
+        node: str,
+        request_keys: Sequence[str],
+        resident: frozenset[str],
+        mutation: CacheMutation,
+    ) -> None:
+        count, digest = self.snapshot(node)
+        count_value = count
+        digest_value = int(digest, 16)
+        victims = frozenset(mutation.evict_keys)
+        for key in victims:
+            count_value -= 1
+            digest_value ^= self._key_digest(key)
+        if mutation.admit:
+            for key in dict.fromkeys(request_keys):
+                if key not in resident or key in victims:
+                    count_value += 1
+                    digest_value ^= self._key_digest(key)
+        self._counts[node] = count_value
+        self._digests[node] = digest_value
 
 
 def _causal_hit_ceiling(workload: Sequence[KernelRequestSpec]) -> float:
@@ -437,7 +474,9 @@ class _DelayedCensus(ClusterCacheCensus):
     def __init__(self, config: CensusConfig, delay_work: float) -> None:
         super().__init__(config)
         self.delay_work = delay_work
-        self._pending_observations: list[tuple[float, int, str, str, str, float]] = []
+        self._pending_observations: list[
+            tuple[float, int, float, str, str, str, float]
+        ] = []
         self._sequence = 0
 
     def observe(
@@ -455,6 +494,7 @@ class _DelayedCensus(ClusterCacheCensus):
             (
                 at_work + self.delay_work,
                 self._sequence,
+                at_work,
                 cache_key,
                 cohort_id,
                 holder_id,
@@ -471,7 +511,7 @@ class _DelayedCensus(ClusterCacheCensus):
         self._pending_observations = [
             item
             for item in self._pending_observations
-            if (item[2], item[3], item[4]) != (cache_key, cohort_id, holder_id)
+            if (item[3], item[4], item[5]) != (cache_key, cohort_id, holder_id)
         ]
         heapq.heapify(self._pending_observations)
         super().remove(cache_key, cohort_id, holder_id)
@@ -480,14 +520,14 @@ class _DelayedCensus(ClusterCacheCensus):
         while (
             self._pending_observations and self._pending_observations[0][0] <= now_work
         ):
-            visible_at, _, key, cohort, holder, recovery = heapq.heappop(
+            _, _, captured_at, key, cohort, holder, recovery = heapq.heappop(
                 self._pending_observations
             )
             super().observe(
                 key,
                 cohort,
                 holder,
-                at_work=visible_at,
+                at_work=captured_at,
                 recovery_work=recovery,
             )
 
@@ -506,6 +546,7 @@ class _DecisionLedgerPolicy(KernelPolicy):
         self.eviction = eviction
         self.records: list[dict[str, object]] = []
         self._sequence = 0
+        self._cache_digest = _CacheDigestLedger()
 
     def _append(self, record: dict[str, object], *, at_work: float) -> None:
         record["decision_time_work"] = at_work
@@ -656,16 +697,35 @@ class _DecisionLedgerPolicy(KernelPolicy):
     ) -> CacheMutation:
         mutation = self.inner.cache_mutation(request, attempt, view)
         if self.eviction is not None:
+            resident = view.cache_by_node[attempt.p_node_id]
+            census_input_count, census_input_digest = self._cache_digest.snapshot(
+                attempt.p_node_id
+            )
+            if census_input_count != len(resident):
+                raise ValueError("cache digest ledger diverged from causal cache size")
+            refreshed_at = self.eviction.last_decision_census_refresh_work
             self._append(
                 {
                     "logical_id": attempt.logical_request_id,
                     "attempt_index": attempt.attempt_index,
                     "decision_kind": "EVICTION",
                     "victims": list(mutation.evict_keys),
-                    "census_age_work": getattr(self.eviction.census, "delay_work", 0.0),
-                    "census_input_keys": sorted(view.cache_by_node[attempt.p_node_id]),
+                    "census_age_work": (
+                        None
+                        if refreshed_at is None
+                        else view.now_work - refreshed_at
+                    ),
+                    "census_refreshed_at_work": refreshed_at,
+                    "census_input_count": census_input_count,
+                    "census_input_digest": census_input_digest,
                 },
                 at_work=view.now_work,
+            )
+            self._cache_digest.apply(
+                attempt.p_node_id,
+                request.prefix_cache_keys,
+                resident,
+                mutation,
             )
         return mutation
 
@@ -798,6 +858,12 @@ def execute_cell(
         for item in ledger_policy.records
     )
     decision_fingerprint = hashlib.sha256("\n".join(decision_log).encode()).hexdigest()
+    measured_census_ages = [
+        age
+        for record in ledger_policy.records
+        if record.get("decision_kind") == "EVICTION"
+        and isinstance(age := record.get("census_age_work"), (int, float))
+    ]
     gated_retry_count = 0
     if decode is not None:
         gated_ids = {
@@ -852,7 +918,11 @@ def execute_cell(
         1.0,
         decision_log,
         decision_fingerprint,
-        visibility_delay_work if cell.strategy == "CENSUS_EVICTION" else None,
+        (
+            max(measured_census_ages, default=0.0)
+            if cell.strategy == "CENSUS_EVICTION"
+            else None
+        ),
         visibility_delay_work,
         metrics.attempt_count,
         metrics.attempt_count - metrics.offered_logical_requests,

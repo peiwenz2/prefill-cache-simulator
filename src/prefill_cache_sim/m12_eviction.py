@@ -7,6 +7,7 @@ from collections import OrderedDict, defaultdict, deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from itertools import islice
 from types import MappingProxyType
 
 from .m12_kernel import (
@@ -69,6 +70,15 @@ class ClusterCacheCensus:
     def duplicate_replica_updates(self) -> int:
         """Compatibility metric: refreshes are observations, never replicas."""
         return self.refresh_observations
+
+    @property
+    def latest_visible_snapshot_work(self) -> float | None:
+        """Capture time of the newest observation visible to policy lookups."""
+        return (
+            self._latest_observed_work
+            if math.isfinite(self._latest_observed_work)
+            else None
+        )
 
     def observe(
         self,
@@ -273,6 +283,11 @@ class M12EvictionPolicy(KernelPolicy):
         self.hit_tokens = 0
         self.input_tokens = 0
         self._last_census_refresh = -math.inf
+        self._last_decision_visible_snapshot_work: float | None = None
+
+    @property
+    def last_decision_census_refresh_work(self) -> float | None:
+        return self._last_decision_visible_snapshot_work
 
     def plan_attempts(
         self, request: KernelRequestSpec, view: CausalView
@@ -327,19 +342,28 @@ class M12EvictionPolicy(KernelPolicy):
         view: CausalView,
     ) -> CacheMutation:
         node = attempt.p_node_id
-        resident = set(view.cache_by_node[node])
-        additions = set(request.prefix_cache_keys) - resident
+        resident = view.cache_by_node[node]
+        additions = tuple(
+            key
+            for key in dict.fromkeys(request.prefix_cache_keys)
+            if key not in resident
+        )
         required = max(
-            0, len(resident | additions) - self.config.cache_capacity_entries
+            0, len(resident) + len(additions) - self.config.cache_capacity_entries
         )
         if self.config.mode is EvictionMode.LRU:
             victims = tuple(
-                key for key in self._lru[node] if key in resident
-            )[:required]
+                islice(
+                    (key for key in self._lru[node] if key in resident), required
+                )
+            )
         else:
             candidates = tuple(
                 self._candidate(key, node, view.now_work)
                 for key in sorted(resident)
+            )
+            self._last_decision_visible_snapshot_work = (
+                self.census.latest_visible_snapshot_work
             )
             try:
                 victims = choose_eviction_victims(candidates, required=required)
