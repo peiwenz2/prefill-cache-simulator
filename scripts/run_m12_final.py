@@ -23,7 +23,7 @@ import tempfile
 import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1939,7 +1939,16 @@ def _write_atomic(output_dir: Path, artifacts: Mapping[str, bytes]) -> None:
         ordered = [name for name in sorted(artifacts) if name != manifest_name]
         ordered.append(manifest_name)
         for name in ordered:
-            target = staging / name
+            relative = PurePosixPath(name)
+            if (
+                relative.is_absolute()
+                or not relative.parts
+                or ".." in relative.parts
+                or str(relative) != name
+                or "\\" in name
+            ):
+                raise ValueError(f"unsafe artifact path: {name!r}")
+            target = staging.joinpath(*relative.parts)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(artifacts[name])
         try:

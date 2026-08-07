@@ -1,0 +1,22 @@
+{
+  "schema_version": "m12-repair-input-manifest-v1",
+  "git_sha": "da594318b78c0901874d784bae87e8e197dddcf7",
+  "git_dirty": false,
+  "attestation_basis": "operator-observed clean HEAD at each isolated run launch; payload hashes frozen before merge",
+  "trace_sha256": "b434f1816a707f4bac697235588184ebc374c9907cb981bb65fb0643471fe711",
+  "python_version": "3.12.12",
+  "source_sha256": {
+    "scripts/run_m12_final.py": "1bb6119d5c105cf1aadcb72feb445eddeb47a5e5c03f58afbe9791c1e3bb86d5",
+    "src/prefill_cache_sim/m12_decode.py": "c860a439c16585fa40703d8a9867e6faffb54c8a7c90a9838afda2827183236d",
+    "src/prefill_cache_sim/m12_kernel.py": "df8b1e45aaad980a9bb10ffe7b616c7c01d839df2f25914ed3fa888df552afff"
+  },
+  "payloads": {
+    "invariance/COMPUTE_BOUND-0.8x-BASELINE.pkl": "40bf1e073eced72fd2bd03a13ad343d89da4fc50906368c995b073a1cae39135",
+    "invariance/MEMORY_BOUND-2.0x-DECODE_CAUSAL.pkl": "90cccb2b839c780d9a81c2a7e8265ea1e2fefa6a1715f52ebf1dd03f609a5312",
+    "invariance/MIXED-1.5x-BASELINE.pkl": "b95a9cec3b7a573b9d00a338b3fc672cf1404e2ddf5f3f98cf5725d876e1b233",
+    "invariance/MIXED-1.5x-PRICED_SPILL.pkl": "4d04e1b46db54457da163a299bb4f5d24d42e9ae6a81e34e350f74e54ea83566",
+    "missing-cell-delay1.pkl": "e277a2dae9548410f6cfaf425b1aecd9ef6e5063e05c22f76f2998ee07cb1f22",
+    "missing-cell.pkl": "e22f195070e81109ba4cb9059fe6b97af837e7bcbdcb4e94fb252dd1449b68de",
+    "mixed-1.5-decode-no-gate.pkl": "5c66593725c2ec479d9266a1d319574be0e270c9f3a7576a843518861c41dd32"
+  }
+}
