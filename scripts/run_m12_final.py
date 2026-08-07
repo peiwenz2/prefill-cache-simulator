@@ -14,13 +14,17 @@ import io
 import json
 import math
 import os
+import platform
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from typing import Any, cast
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -79,6 +83,126 @@ SENSITIVITY_STRATEGIES = (
     "DECODE_ORACLE_NOISED",
 )
 MANIFEST_SCHEMA = "m12-final-manifest-v1"
+RSS_SOFT_LIMIT_BYTES = 1 * 1024**3
+RSS_HARD_LIMIT_BYTES = int(1.5 * 1024**3)
+RSS_POLL_INTERVAL_SECONDS = 0.1
+
+
+class _RssHardLimitExceeded(RuntimeError):
+    def __init__(self, cell_id: str, rss_bytes: int, hard_limit_bytes: int) -> None:
+        self.cell_id = cell_id
+        self.rss_bytes = rss_bytes
+        self.hard_limit_bytes = hard_limit_bytes
+        super().__init__(
+            f"RSS hard limit exceeded in {cell_id}: "
+            f"{rss_bytes} > {hard_limit_bytes} bytes"
+        )
+
+
+class RssGridAborted(RuntimeError):
+    """The grid stopped after an RSS hard-limit interrupt."""
+
+
+def _current_rss_bytes() -> int:
+    if platform.system() == "Linux":
+        fields = Path("/proc/self/statm").read_text().split()
+        if len(fields) < 2:
+            raise RuntimeError("/proc/self/statm did not contain resident pages")
+        return int(fields[1]) * int(os.sysconf("SC_PAGE_SIZE"))
+    if platform.system() == "Darwin":
+        completed = subprocess.run(
+            ("ps", "-o", "rss=", "-p", str(os.getpid())),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return int(completed.stdout.strip()) * 1024
+    raise RuntimeError("RSS watchdog supports Linux and macOS only")
+
+
+class _RssWatchdog:
+    def __init__(
+        self,
+        cell_id: str,
+        *,
+        reader: Callable[[], int],
+        soft_limit_bytes: int,
+        hard_limit_bytes: int,
+        poll_interval_seconds: float,
+        diagnostic: dict[str, object],
+    ) -> None:
+        self.cell_id = cell_id
+        self.reader = reader
+        self.soft_limit_bytes = soft_limit_bytes
+        self.hard_limit_bytes = hard_limit_bytes
+        self.poll_interval_seconds = poll_interval_seconds
+        self.diagnostic = diagnostic
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._previous_handler: Any = signal.SIG_DFL
+
+    def __enter__(self) -> _RssWatchdog:
+        if threading.current_thread() is not threading.main_thread():
+            raise RuntimeError("RSS watchdog must be installed by the main thread")
+        self._previous_handler = signal.getsignal(signal.SIGUSR1)
+
+        def interrupt(_signum, _frame) -> None:
+            raise _RssHardLimitExceeded(
+                self.cell_id,
+                cast(int, self.diagnostic["last_rss_bytes"]),
+                self.hard_limit_bytes,
+            )
+
+        signal.signal(signal.SIGUSR1, interrupt)
+        self._thread = threading.Thread(
+            target=self._poll,
+            name=f"m12-rss-watchdog-{self.cell_id}",
+            daemon=True,
+        )
+        try:
+            self._thread.start()
+        except BaseException:
+            signal.signal(signal.SIGUSR1, self._previous_handler)
+            raise
+        return self
+
+    def _poll(self) -> None:
+        while not self._stop.wait(self.poll_interval_seconds):
+            try:
+                rss_bytes = self.reader()
+            except (OSError, RuntimeError, ValueError) as error:
+                self.diagnostic["reader_error"] = f"{type(error).__name__}: {error}"
+                return
+            if rss_bytes < 0:
+                self.diagnostic["reader_error"] = "RSS reader returned a negative value"
+                return
+            self.diagnostic["last_rss_bytes"] = rss_bytes
+            self.diagnostic["peak_rss_bytes"] = max(
+                cast(int, self.diagnostic["peak_rss_bytes"]), rss_bytes
+            )
+            if rss_bytes > self.soft_limit_bytes:
+                self.diagnostic["soft_limit_exceeded"] = True
+            if rss_bytes > self.hard_limit_bytes:
+                self.diagnostic.update(
+                    {
+                        "hard_limit_exceeded": True,
+                        "aborted_cell_id": self.cell_id,
+                    }
+                )
+                os.kill(os.getpid(), signal.SIGUSR1)
+                return
+
+    def __exit__(self, _exc_type, _exc, _traceback) -> None:
+        self._stop.set()
+        join_failed = False
+        try:
+            if self._thread is not None:
+                self._thread.join(timeout=max(1.0, self.poll_interval_seconds * 2))
+                join_failed = self._thread.is_alive()
+        finally:
+            signal.signal(signal.SIGUSR1, self._previous_handler)
+        if join_failed:
+            raise RuntimeError("RSS watchdog thread failed to stop")
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,10 +336,51 @@ def run_artifacts(
         build_trace_workload
     ),
     binding_cells: set[tuple[str, float]] | None = None,
+    rss_reader: Callable[[], int] = _current_rss_bytes,
+    rss_soft_limit_bytes: int = RSS_SOFT_LIMIT_BYTES,
+    rss_hard_limit_bytes: int = RSS_HARD_LIMIT_BYTES,
+    rss_poll_interval_seconds: float = RSS_POLL_INTERVAL_SECONDS,
 ) -> dict[str, bytes]:
+    if not 0 < rss_soft_limit_bytes < rss_hard_limit_bytes:
+        raise ValueError("RSS limits must be positive and soft < hard")
+    if rss_poll_interval_seconds <= 0:
+        raise ValueError("RSS poll interval must be positive")
     workload, trace_metadata = workload_loader(trace_path)
     execute = executor or execute_cell
     cached_results: dict[str, CellResult] = {}
+    results: list[CellResult] = []
+    failures: list[dict[str, object]] = []
+    rss_abort: _RssHardLimitExceeded | None = None
+    rss_diagnostic: dict[str, object] = {
+        "schema_version": "m12-rss-watchdog-v1",
+        "soft_limit_bytes": rss_soft_limit_bytes,
+        "hard_limit_bytes": rss_hard_limit_bytes,
+        "poll_interval_seconds": rss_poll_interval_seconds,
+        "peak_rss_bytes": 0,
+        "last_rss_bytes": 0,
+        "soft_limit_exceeded": False,
+        "hard_limit_exceeded": False,
+        "aborted_cell_id": None,
+        "reader_error": None,
+    }
+
+    def execute_guarded(
+        cell: FinalCell, *, visibility_delay_work: float = 0.0
+    ) -> CellResult:
+        with _RssWatchdog(
+            cell.cell_id,
+            reader=rss_reader,
+            soft_limit_bytes=rss_soft_limit_bytes,
+            hard_limit_bytes=rss_hard_limit_bytes,
+            poll_interval_seconds=rss_poll_interval_seconds,
+            diagnostic=rss_diagnostic,
+        ):
+            if execute is execute_cell:
+                return execute_cell(
+                    workload, cell, visibility_delay_work=visibility_delay_work
+                )
+            return execute(workload, cell)
+
     discovered_hit_ceiling: float | None = None
     if binding_cells is None:
         if not isinstance(workload, Sequence):
@@ -235,7 +400,18 @@ def run_artifacts(
                 flush=True,
             )
             probe = FinalCell(regime, scale, "EVICTION_LRU", "PRIMARY")
-            result = execute(workload, probe)
+            try:
+                result = execute_guarded(probe)
+            except _RssHardLimitExceeded as error:
+                rss_abort = error
+                failures.append(
+                    {
+                        "cell_id": probe.cell_id,
+                        "error_type": type(error).__name__,
+                        "error": str(error),
+                    }
+                )
+                break
             is_binding = hit_ceiling - result.token_hit_rate >= 0.03
             if is_binding:
                 binding.add((regime, scale))
@@ -249,24 +425,26 @@ def run_artifacts(
     else:
         binding = set(binding_cells)
     plan = build_cell_plan(binding)
-    results: list[CellResult] = []
-    failures: list[dict[str, object]] = []
-    for index, cell in enumerate(plan, start=1):
+    for index, cell in enumerate(plan if rss_abort is None else (), start=1):
         print(
             f"[{index:03d}/{len(plan):03d}] {cell.cell_id}",
             file=sys.stderr,
             flush=True,
         )
         try:
-            result = cached_results.get(cell.cell_id) or execute(workload, cell)
-            if result.cell != cell:
+            grid_result = cached_results.get(cell.cell_id)
+            if grid_result is None:
+                grid_result = execute_guarded(cell)
+            if grid_result.cell != cell:
                 raise ValueError("executor returned a mismatched cell identity")
             if (
                 cell.strategy in ("EVICTION_LRU", "CENSUS_EVICTION")
                 and discovered_hit_ceiling is not None
             ):
-                result = replace(result, hit_ceiling=discovered_hit_ceiling)
-            results.append(result)
+                grid_result = replace(
+                    grid_result, hit_ceiling=discovered_hit_ceiling
+                )
+            results.append(grid_result)
         except (ValueError, RuntimeError) as error:
             failures.append(
                 {
@@ -275,15 +453,45 @@ def run_artifacts(
                     "error": str(error),
                 }
             )
-    if not results:
+            if isinstance(error, _RssHardLimitExceeded):
+                rss_abort = error
+                break
+    if not results and rss_abort is None:
         raise ValueError("final experiment produced no finite results")
+    visibility_audit: Mapping[str, object] | None = None
+    if rss_abort is None:
+        try:
+            visibility_audit = _visibility_delay_audit(
+                [result for result in results if result.cell.category == "PRIMARY"],
+                workload=workload,
+                executor=lambda _workload, cell: execute_guarded(
+                    cell, visibility_delay_work=1.0
+                ),
+                delta_work=1.0,
+            )
+        except _RssHardLimitExceeded as error:
+            rss_abort = error
+            failures.append(
+                {
+                    "cell_id": error.cell_id,
+                    "error_type": type(error).__name__,
+                    "error": str(error),
+                }
+            )
+    if rss_abort is not None:
+        artifacts = _build_rss_abort_artifacts(
+            failures, trace_metadata, rss_diagnostic
+        )
+        _write_atomic(output_dir, artifacts)
+        raise RssGridAborted(str(rss_abort)) from rss_abort
+    assert visibility_audit is not None
     artifacts = _build_artifacts(
         results,
         failures,
         trace_metadata,
         binding,
-        workload=workload,
-        executor=execute,
+        visibility_audit=visibility_audit,
+        rss_diagnostic=rss_diagnostic,
     )
     _write_atomic(output_dir, artifacts)
     return artifacts
@@ -965,8 +1173,8 @@ def _build_artifacts(
     trace_metadata: Mapping[str, object],
     binding_cells: set[tuple[str, float]],
     *,
-    workload: object,
-    executor: Callable[[object, FinalCell], CellResult],
+    visibility_audit: Mapping[str, object],
+    rss_diagnostic: Mapping[str, object],
 ) -> dict[str, bytes]:
     plan = build_cell_plan(binding_cells)
     primary = [result for result in results if result.cell.category == "PRIMARY"]
@@ -981,14 +1189,8 @@ def _build_artifacts(
         "sensitivities.csv": _csv_bytes(sensitivity, _primary_row),
         "pareto.json": _json_bytes(_pareto(primary, expected_cells=plan)),
         "attribution.json": _json_bytes(_attribution(primary, expected_cells=plan)),
-        "falsification/visibility-delay.json": _json_bytes(
-            _visibility_delay_audit(
-                primary,
-                workload=workload,
-                executor=executor,
-                delta_work=1.0,
-            )
-        ),
+        "falsification/visibility-delay.json": _json_bytes(visibility_audit),
+        "diagnostics/rss-watchdog.json": _json_bytes(rss_diagnostic),
         "crossovers.csv": _csv_mapping_bytes(_crossovers(primary, expected_cells=plan)),
         "failures.csv": _csv_mapping_bytes(failures),
         "gates/g12-3.json": _json_bytes(_g12_3(results, expected_cells=plan)),
@@ -1690,20 +1892,82 @@ def _manifest_bytes(artifacts: Mapping[str, bytes]) -> bytes:
     )
 
 
+def _build_rss_abort_artifacts(
+    failures: Sequence[Mapping[str, object]],
+    trace_metadata: Mapping[str, object],
+    rss_diagnostic: Mapping[str, object],
+) -> dict[str, bytes]:
+    artifacts = {
+        "ABORTED.json": _json_bytes(
+            {
+                "schema_version": "m12-final-abort-v1",
+                "status": "ABORTED_RSS_HARD_LIMIT",
+                "trace_metadata": dict(trace_metadata),
+            }
+        ),
+        "diagnostics/rss-watchdog.json": _json_bytes(rss_diagnostic),
+        "failures.csv": _csv_mapping_bytes(failures),
+    }
+    artifacts["ABORT_MANIFEST.json"] = _json_bytes(
+        {
+            "schema_version": "m12-final-abort-manifest-v1",
+            "status": "ABORTED",
+            "algorithm": "sha256",
+            "files": {
+                name: hashlib.sha256(payload).hexdigest()
+                for name, payload in sorted(artifacts.items())
+            },
+        }
+    )
+    return artifacts
+
+
 def _write_atomic(output_dir: Path, artifacts: Mapping[str, bytes]) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(dir=output_dir.parent, prefix=".m12-final-"))
+    backup: Path | None = None
     try:
-        ordered = [name for name in sorted(artifacts) if name != "MANIFEST.json"]
-        ordered.append("MANIFEST.json")
+        manifest_name = (
+            "MANIFEST.json"
+            if "MANIFEST.json" in artifacts
+            else "ABORT_MANIFEST.json"
+            if "ABORT_MANIFEST.json" in artifacts
+            else None
+        )
+        if manifest_name is None:
+            raise ValueError("artifact set requires a success or abort manifest")
+        ordered = [name for name in sorted(artifacts) if name != manifest_name]
+        ordered.append(manifest_name)
         for name in ordered:
             target = staging / name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(artifacts[name])
-        for name in ordered:
-            destination = output_dir / name
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(staging / name, destination)
+        try:
+            if output_dir.exists():
+                backup = Path(
+                    tempfile.mkdtemp(
+                        dir=output_dir.parent, prefix=".m12-previous-"
+                    )
+                )
+                backup.rmdir()
+                os.replace(output_dir, backup)
+            os.replace(staging, output_dir)
+        except BaseException:
+            if backup is not None and backup.exists():
+                if output_dir.exists():
+                    shutil.rmtree(output_dir)
+                os.replace(backup, output_dir)
+            raise
+        if backup is not None:
+            try:
+                shutil.rmtree(backup)
+            except BaseException:
+                # staging→live is the commit point.  Cleanup may have already
+                # partially deleted the old tree, so it is never safe to roll
+                # that backup over the complete committed publication.
+                if backup.exists():
+                    shutil.rmtree(backup, ignore_errors=True)
+                raise
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
@@ -1714,10 +1978,14 @@ def main() -> int:
             "run_m12_placement.py is active; final heavy run deferred", file=sys.stderr
         )
         return 2
-    run_artifacts(
-        ROOT / "mooncake_trace.jsonl",
-        ROOT / "results" / "m12-final",
-    )
+    try:
+        run_artifacts(
+            ROOT / "mooncake_trace.jsonl",
+            ROOT / "results" / "m12-final",
+        )
+    except RssGridAborted as error:
+        print(str(error), file=sys.stderr)
+        return 3
     return 0
 
 

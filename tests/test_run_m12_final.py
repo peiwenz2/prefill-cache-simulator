@@ -4,8 +4,12 @@ import hashlib
 import inspect
 import json
 import os
+import shutil
+import signal
 import subprocess
 import sys
+import threading
+import time
 from collections import OrderedDict
 from dataclasses import replace
 from pathlib import Path
@@ -39,6 +43,7 @@ from scripts.run_m12_final import (
     ARRIVAL_SCALES,
     PRIMARY_STRATEGIES,
     CellResult,
+    RssGridAborted,
     _attribution,
     _CacheDigestLedger,
     _causal_hit_ceiling,
@@ -50,6 +55,7 @@ from scripts.run_m12_final import (
     _g12_3,
     _pareto,
     _retry_pressure_abort_fences,
+    _RssWatchdog,
     build_cell_plan,
     execute_cell,
     placement_run_active,
@@ -132,6 +138,7 @@ def test_artifacts_are_atomic_deterministic_and_load_workload_once(
         executor=lambda _workload, cell: fake_result(cell),
         workload_loader=loader,
         binding_cells=binding,
+        rss_reader=lambda: 0,
     )
     second = run_artifacts(
         tmp_path / "trace.jsonl",
@@ -139,6 +146,7 @@ def test_artifacts_are_atomic_deterministic_and_load_workload_once(
         executor=lambda _workload, cell: fake_result(cell),
         workload_loader=loader,
         binding_cells=binding,
+        rss_reader=lambda: 0,
     )
     assert loads == 2  # exactly once per complete experiment, never per cell
     plan = build_cell_plan(binding)
@@ -161,6 +169,7 @@ def test_artifacts_are_atomic_deterministic_and_load_workload_once(
         "failures.csv",
         "gates/g12-3.json",
         "gates/g12-4.json",
+        "diagnostics/rss-watchdog.json",
         "contract.json",
         "config.json",
         "provenance.json",
@@ -184,6 +193,307 @@ def test_artifacts_are_atomic_deterministic_and_load_workload_once(
     )
 
 
+def test_rss_watchdog_interrupts_cell_stops_grid_and_cleans_thread(
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+
+    def blocked(_workload, cell):
+        calls.append(cell.cell_id)
+        while True:
+            time.sleep(0.01)
+
+    previous = signal.getsignal(signal.SIGUSR1)
+
+    def prior_handler(_signum, _frame):
+        return None
+
+    signal.signal(signal.SIGUSR1, prior_handler)
+    try:
+        with pytest.raises(RssGridAborted, match="RSS hard limit exceeded"):
+            run_artifacts(
+                tmp_path / "trace.jsonl",
+                tmp_path / "out",
+                executor=blocked,
+                workload_loader=lambda _path: ("workload", {"trace_sha256": "x"}),
+                binding_cells=set(),
+                rss_reader=lambda: 300,
+                rss_soft_limit_bytes=100,
+                rss_hard_limit_bytes=200,
+                rss_poll_interval_seconds=0.001,
+            )
+        assert signal.getsignal(signal.SIGUSR1) is prior_handler
+    finally:
+        signal.signal(signal.SIGUSR1, previous)
+    assert len(calls) == 1
+    diagnostic = json.loads(
+        (tmp_path / "out/diagnostics/rss-watchdog.json").read_text()
+    )
+    assert diagnostic["soft_limit_exceeded"] is True
+    assert diagnostic["hard_limit_exceeded"] is True
+    assert diagnostic["aborted_cell_id"] == calls[0]
+    failures = (tmp_path / "out/failures.csv").read_text()
+    assert "_RssHardLimitExceeded" in failures
+    assert not (tmp_path / "out/MANIFEST.json").exists()
+    assert not (tmp_path / "out/contract.json").exists()
+    abort_manifest = json.loads((tmp_path / "out/ABORT_MANIFEST.json").read_text())
+    assert abort_manifest["status"] == "ABORTED"
+    assert json.loads((tmp_path / "out/ABORTED.json").read_text())["status"] == (
+        "ABORTED_RSS_HARD_LIMIT"
+    )
+    assert not any(
+        thread.name.startswith("m12-rss-watchdog-")
+        for thread in threading.enumerate()
+    )
+
+
+def test_rss_watchdog_soft_limit_reports_without_false_hard_trip(
+    tmp_path: Path,
+) -> None:
+    artifacts = run_artifacts(
+        tmp_path / "trace.jsonl",
+        tmp_path / "out",
+        executor=lambda _workload, cell: (time.sleep(0.002), fake_result(cell))[1],
+        workload_loader=lambda _path: ("workload", {"trace_sha256": "x"}),
+        binding_cells=set(),
+        rss_reader=lambda: 150,
+        rss_soft_limit_bytes=100,
+        rss_hard_limit_bytes=200,
+        rss_poll_interval_seconds=0.001,
+    )
+    diagnostic = json.loads(artifacts["diagnostics/rss-watchdog.json"])
+    assert diagnostic["soft_limit_exceeded"] is True
+    assert diagnostic["hard_limit_exceeded"] is False
+    assert diagnostic["aborted_cell_id"] is None
+    assert not any(
+        thread.name.startswith("m12-rss-watchdog-")
+        for thread in threading.enumerate()
+    )
+
+
+def test_rss_watchdog_also_guards_visibility_reruns(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def execute(_workload, cell):
+        calls.append(cell.cell_id)
+        time.sleep(0.002)
+        return fake_result(cell)
+
+    def reader() -> int:
+        return 300 if len(calls) > len(build_cell_plan(set())) else 0
+
+    with pytest.raises(RssGridAborted):
+        run_artifacts(
+            tmp_path / "trace.jsonl",
+            tmp_path / "out",
+            executor=execute,
+            workload_loader=lambda _path: ("workload", {"trace_sha256": "x"}),
+            binding_cells=set(),
+            rss_reader=reader,
+            rss_soft_limit_bytes=100,
+            rss_hard_limit_bytes=200,
+            rss_poll_interval_seconds=0.001,
+        )
+    assert len(calls) == len(build_cell_plan(set())) + 1
+    diagnostic = json.loads(
+        (tmp_path / "out/diagnostics/rss-watchdog.json").read_text()
+    )
+    assert diagnostic["hard_limit_exceeded"] is True
+    assert not (tmp_path / "out/MANIFEST.json").exists()
+
+
+def test_guarded_real_visibility_rerun_preserves_requested_delay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import scripts.run_m12_final as runner
+
+    observed_delays: list[float] = []
+
+    def fake_execute(_workload, cell, *, visibility_delay_work=0.0):
+        observed_delays.append(visibility_delay_work)
+        return replace(
+            fake_result(cell), visibility_delay_work=visibility_delay_work
+        )
+
+    monkeypatch.setattr(runner, "execute_cell", fake_execute)
+    monkeypatch.setattr(
+        runner, "_build_artifacts", lambda *args, **kwargs: {"MANIFEST.json": b"{}"}
+    )
+    runner.run_artifacts(
+        tmp_path / "trace.jsonl",
+        tmp_path / "out",
+        workload_loader=lambda _path: ("workload", {"trace_sha256": "x"}),
+        binding_cells=set(),
+        rss_reader=lambda: 0,
+    )
+    assert 0.0 in observed_delays
+    assert 1.0 in observed_delays
+
+
+def test_artifact_directory_transitions_remove_stale_success_and_abort(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "out"
+
+    def success() -> None:
+        run_artifacts(
+            tmp_path / "trace.jsonl",
+            output,
+            executor=lambda _workload, cell: fake_result(cell),
+            workload_loader=lambda _path: ("workload", {"trace_sha256": "x"}),
+            binding_cells=set(),
+            rss_reader=lambda: 0,
+        )
+
+    success()
+    assert (output / "MANIFEST.json").exists()
+
+    with pytest.raises(RssGridAborted):
+        run_artifacts(
+            tmp_path / "trace.jsonl",
+            output,
+            executor=lambda _workload, _cell: time.sleep(10),
+            workload_loader=lambda _path: ("workload", {"trace_sha256": "x"}),
+            binding_cells=set(),
+            rss_reader=lambda: 300,
+            rss_soft_limit_bytes=100,
+            rss_hard_limit_bytes=200,
+            rss_poll_interval_seconds=0.001,
+        )
+    assert set(path.name for path in output.iterdir()) == {
+        "ABORTED.json",
+        "ABORT_MANIFEST.json",
+        "diagnostics",
+        "failures.csv",
+    }
+    assert not (output / "MANIFEST.json").exists()
+
+    success()
+    assert (output / "MANIFEST.json").exists()
+    assert not (output / "ABORT_MANIFEST.json").exists()
+    assert not (output / "ABORTED.json").exists()
+
+
+def test_atomic_directory_swap_restores_old_tree_on_replace_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import scripts.run_m12_final as runner
+
+    output = tmp_path / "out"
+    output.mkdir()
+    (output / "old.txt").write_text("old")
+    real_replace = os.replace
+    calls = 0
+
+    def fail_staging_swap(source, destination):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("injected staging swap failure")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(runner.os, "replace", fail_staging_swap)
+    with pytest.raises(RuntimeError, match="injected staging swap failure"):
+        runner._write_atomic(output, {"MANIFEST.json": b"new"})
+    assert {path.name for path in output.iterdir()} == {"old.txt"}
+    assert (output / "old.txt").read_text() == "old"
+    assert not list(tmp_path.glob(".m12-final-*"))
+    assert not list(tmp_path.glob(".m12-previous-*"))
+
+
+def test_atomic_directory_swap_keeps_commit_on_backup_cleanup_interrupt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import scripts.run_m12_final as runner
+
+    output = tmp_path / "out"
+    output.mkdir()
+    (output / "old.txt").write_text("old")
+    real_rmtree = shutil.rmtree
+    interrupted = False
+
+    def interrupt_backup_cleanup(path, *args, **kwargs):
+        nonlocal interrupted
+        candidate = Path(path)
+        if candidate.name.startswith(".m12-previous-") and not interrupted:
+            interrupted = True
+            raise KeyboardInterrupt("injected cleanup interrupt")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(runner.shutil, "rmtree", interrupt_backup_cleanup)
+    with pytest.raises(KeyboardInterrupt, match="injected cleanup interrupt"):
+        runner._write_atomic(output, {"MANIFEST.json": b"new"})
+    assert {path.name for path in output.iterdir()} == {"MANIFEST.json"}
+    assert (output / "MANIFEST.json").read_bytes() == b"new"
+    assert not list(tmp_path.glob(".m12-final-*"))
+    assert not list(tmp_path.glob(".m12-previous-*"))
+
+
+def test_atomic_directory_swap_never_restores_partially_deleted_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import scripts.run_m12_final as runner
+
+    output = tmp_path / "out"
+    output.mkdir()
+    (output / "old.txt").write_text("old")
+    real_rmtree = shutil.rmtree
+    interrupted = False
+
+    def partially_delete_then_interrupt(path, *args, **kwargs):
+        nonlocal interrupted
+        candidate = Path(path)
+        if candidate.name.startswith(".m12-previous-") and not interrupted:
+            interrupted = True
+            (candidate / "old.txt").unlink()
+            raise KeyboardInterrupt("injected partial cleanup interrupt")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(runner.shutil, "rmtree", partially_delete_then_interrupt)
+    with pytest.raises(KeyboardInterrupt, match="injected partial cleanup interrupt"):
+        runner._write_atomic(output, {"MANIFEST.json": b"new"})
+    assert {path.name for path in output.iterdir()} == {"MANIFEST.json"}
+    assert (output / "MANIFEST.json").read_bytes() == b"new"
+    assert not list(tmp_path.glob(".m12-final-*"))
+    assert not list(tmp_path.glob(".m12-previous-*"))
+
+
+def test_rss_watchdog_restores_handler_when_thread_start_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    previous = signal.getsignal(signal.SIGUSR1)
+
+    def prior_handler(_signum, _frame):
+        return None
+
+    def fail_start(_thread):
+        raise RuntimeError("start failed")
+
+    signal.signal(signal.SIGUSR1, prior_handler)
+    monkeypatch.setattr(threading.Thread, "start", fail_start)
+    diagnostic = {
+        "last_rss_bytes": 0,
+        "peak_rss_bytes": 0,
+        "soft_limit_exceeded": False,
+    }
+    try:
+        with (
+            pytest.raises(RuntimeError, match="start failed"),
+            _RssWatchdog(
+                "cell",
+                reader=lambda: 0,
+                soft_limit_bytes=100,
+                hard_limit_bytes=200,
+                poll_interval_seconds=0.01,
+                diagnostic=diagnostic,
+            ),
+        ):
+            pass
+        assert signal.getsignal(signal.SIGUSR1) is prior_handler
+    finally:
+        signal.signal(signal.SIGUSR1, previous)
+
+
 def test_binding_probes_have_separate_progress_and_only_binding_cache_path(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -194,6 +504,7 @@ def test_binding_probes_have_separate_progress_and_only_binding_cache_path(
     monkeypatch.setattr(
         runner, "_build_artifacts", lambda *args, **kwargs: {"MANIFEST.json": b"{}"}
     )
+    monkeypatch.setattr(runner, "_visibility_delay_audit", lambda *args, **kwargs: {})
     workload = (
         KernelRequestSpec(
             LogicalRequestSpec("a", "t", "STANDARD", 0, 1, 1), ("K",), (1,)
@@ -691,7 +1002,7 @@ def execute(_workload, cell):
                       .5, 0, 1, 0, .1, .1, 0, 1, 1, False)
 run_artifacts(Path('unused'), Path(sys.argv[1]), executor=execute,
               workload_loader=lambda _: ('w', {'trace_sha256': 'x'}),
-              binding_cells=set())
+              binding_cells=set(), rss_reader=lambda: 0)
 print(hashlib.sha256((Path(sys.argv[1]) / 'MANIFEST.json').read_bytes()).hexdigest())
 """
     digests = []
