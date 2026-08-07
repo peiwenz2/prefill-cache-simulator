@@ -1,9 +1,24 @@
 # Prefill Cache Simulator：策略价值与 benchmark 诚实性审计
 
 - 作者：张珮文
-- 证据版本：`prefill-cache-sim@2f324ead2a3d912ef4301ee3692f83b5dfe3aa75`
+- 证据版本：`prefill-cache-sim@51e7aea`；M12 final grid 正在运行，未完成结果不进入结论
 - 数据集：Mooncake `mooncake_trace.jsonl`，23,608 requests，512-token prefix blocks
 - 证据等级：论文原文＋本地 deterministic replay；真实 GPU／KVT／生产 shadow 仍未完成
+
+## 先读这张术语卡
+
+| 词 | 零背景解释 |
+|---|---|
+| Prefill | 把输入 prompt 算成后续生成需要的 KV 状态；输入越长，计算越贵 |
+| KV cache | 保存已经算过的 prefix 状态；重复前缀可以少算一段 |
+| Selector | 为请求选择 prefill node；每台 node 的 local cache 与 queue 不同 |
+| KVT | KV Transfer，把 KV 状态从一台 node／一层存储搬到另一处 |
+| P stream／D stream | Prefill 计算流／Decode 逐 token 生成流 |
+| HoL blocking | Head-of-line blocking；一个长请求挡住后面短请求 |
+| Goodput | 在 SLO 内完成的有效工作；不同 milestone 的归一化公式不同，数值不能跨表横比 |
+| Load max／mean | 最忙 node 的负载／集群平均；1.0 最均衡，越大越偏斜 |
+| Replica factor | 同一 cache block 平均复制到多少 nodes；越高越浪费有限容量 |
+| Queue p95 | 95% 请求不超过的排队 token-work；本文 M4 数值不是毫秒 |
 
 ## 0. Data Description：这份 trace 到底给了什么
 
@@ -94,10 +109,30 @@ S4 的 `OnlineConversationLinker` 因而明确是 online proxy：只使用当前
 
 ## 1. 总体架构
 
+### 1.0 给零背景读者的 30 秒版本
+
+一个 LLM 请求先做 **prefill**：把输入 prompt 逐 token 计算成可以继续生成的 KV 状态；然后做 **decode**：基于这些状态逐 token 生成答案。长 prompt 的 prefill 很贵。如果下一条请求与过去请求共享开头，就可以直接复用已经算好的 prefix KV blocks。
+
+关键约束是：每台 prefill node 的 local cache 不一样。同一条重复 prefix 如果每次被发到不同 node，就会发生 location miss，明明集群里算过，当前 node 仍要重算。因此 selector 同时影响两件事：
+
+1. **Reuse**：把共享 prefix 的请求聚到持有 cache 的 node。
+2. **Throughput／SLO**：避免所有热请求粘到同一 node，导致 queue、TTFT 与 tail latency 爆炸。
+
+```text
+Request → 切成 512-token chained prefix blocks
+        → selector 选择 prefill node
+        → node local cache 连续查找
+        → 命中部分直接复用，首个 miss 后重算
+        → 新 KV 写回 local cache／shared KVS
+        → decode 在 D stream 继续执行
+```
+
+这就是本文的中心矛盾：**只追 hit 会形成 hotspot；只追空闲会打散 cache。真正的目标是 completed goodput，而不是单一 hit rate。**
+
 ### 先给结论
 
 1. **这份 trace 的 exact-prefix workload ceiling 是约 51%～57%，不是 90%。**论文的 global LRU infinite-capacity 是 0.51；本仓按 block reference 复算为 55.255%，按 token 加权为 57.070%。
-2. **当前已实证的最大收益来自“把相同前缀重新聚到一起”。**S3 从 Random 的 44.30% 提升到 54.01%，增加 9.71 pp；54.01% 是有限多节点 local cache，57.07% 是无限单池 token ceiling，94.6% 只能作空间利用参照；代价是 request load max/mean=1.822。
+2. **当前已实证的最大机制收益来自“把相同前缀重新聚到一起”，但没有无条件 winner。**在 M4 的 100ms delayed-view headline 中，S3 从 Random 的 44.30% 提升到 54.01%，代价是 request load max/mean=1.822；在 fresh view（0ms）下，S5 反而以 53.01% hit＋queue p95 1220 同时优于 S3。视图质量决定应该偏向 stable ownership 还是动态 cost score。
 3. **最值钱的设计不是单个 selector，而是 KVS-aware、SLO-aware 的统一 marginal-cost decision。**它把 `local reuse`、`remote transfer`、`recompute`、`queue`、`SLO risk` 放进同一个选择题，并允许在 D stream 过载时避免继续浪费 GPU work。
 4. **Decode lease／cooperative preemption 的潜在收益可能比剩余 cache hit 更大，但证据最弱。**D1 在单 D node 的极端阻塞中把 strict goodput 从 0.00718 提到 0.14181，约 19.7×；到 2 个 D node 时反而低于 D0。它是 pressure tool，不是 always-on policy。
 5. **当前 tier 假设没有伪造 Mooncake benchmark，但不能称为 Mooncake reproduction。**prefix 语义、LRU、global DRAM/KVS、remote-vs-recompute 都同构；GPU residency、layer-wise overlap、SSD swap、network congestion、真实 TTFT/TBT 尚未被硬件标定。
@@ -146,12 +181,170 @@ score = load(node) + request.input_tokens - cache_discount * hit
 | S0 Random | 均匀随机 | 44.30% | 无偏 baseline | 打散 temporal locality |
 | S1 RoundRobin | 请求轮转 | 44.25% | request load max/mean=1.0 | 不看 token work 与 prefix |
 | S2 LeastWork | 最少 running＋queued tokens | 43.67% | 负载感知 | 主动打散 prefix，命中最低 |
-| S3 GBPrefixBucket | prefix anchor stable owner；过载 bounded fallback | **54.01%** | **+9.71 pp，最接近 ceiling** | load max/mean=1.822；hot prefix 会形成 hotspot |
+| S3 GBPrefixBucket | prefix anchor stable owner；过载 bounded fallback | **54.01%** | delayed view 下最大化 locality | load max/mean=1.822；不是无条件 winner |
 | S4 SessionAffinity | 在线 conversation link＋sticky owner | 53.34% | 命中接近 S3，load max/mean=1.047 | trace 没有真实 session_id，linker 是推断 |
-| S5 FlexLbTtft | queue＋input−0.7×hit | 52.32% | 直接表达 queue/cache trade-off | queue p95=6589 normalized，M4 stop-gated |
+| S5 FlexLbTtft | queue＋input−0.7×hit | 52.32% | fresh view 下 hit／queue 同时最好 | 50ms stale view 触发 herding，queue p95=6589 |
 | S6 CalibratedTtft | `(load＋uncached)×coefficient` | 53.37% | 接近 Mooncake estimated TTFT 形式 | coefficient 仍是 synthetic；没有真实 KVT congestion |
 
 S3／S4 的 capacity gate 与 fallback 在 `selectors.py:65-119,127-209`。S5／S6 在 `selectors.py:212-268`。
+
+#### 2.2.1 实验契约：这些数字到底在什么世界里成立
+
+M4 headline 的统一配置是：4 个 prefill nodes、集群总容量 50,000 blocks、E1 LRU、请求排队、prefill 完成后才写 cache、100ms delayed cluster view、seed 713。数据来自 `results/m4/results.csv` 的 `A1-*` rows。
+
+| 变量 | M4 的含义 | 为什么影响排名 |
+|---|---|---|
+| Per-node local cache | 每台 node 只看到自己的 12,500 blocks | 同 prefix 被分散就产生副本与 location miss |
+| Delayed view=100ms | load、cache hit estimate、last-selected 都来自冻结快照 | 动态 argmin 会在窗口内反复追同一个“最优”node |
+| Insert at completion | prefill 完成前，其他请求看不到新 KV | concurrent duplicate compute 不会被假装成 hit |
+| Strict prefix | 首个 miss 后停止计 hit | 不允许跳过中间 miss“作弊” |
+| Normalized work | queue 是 token-work proxy，不是真实毫秒 | 只能比较相对趋势，不能发布 production TTFT |
+
+#### 2.2.2 S0／S1／S2：先建立三个朴素 baseline
+
+| 策略 | 输入与伪码 | 它验证什么 | M4 结果与瓶颈 |
+|---|---|---|---|
+| S0 Random | `uniform(alive_nodes)` | 不带偏好的基准 | hit 44.30%；load max／mean 1.013；queue p95 4097。均衡，但打散 locality |
+| S1 RoundRobin | `node = nodes[counter % N]` | request-count 均衡 | hit 44.25%；request load=1.0；queue p95 3876。不同长度请求使 count 均衡不等于 work 均衡 |
+| S2 LeastWork | `argmin(running_tokens + queued_uncached_tokens)` | 纯负载感知是否够用 | hit 43.67%；load max／mean 1.012；queue p95 **8061**。stale snapshot 下形成 herd effect |
+
+S2 是重要反例：动态追“最闲”不一定减少排队。多个请求在同一冻结窗口看到同一个最闲 node，会一起涌过去；下一次刷新时再一起转向另一台 node。它说明分布式 selector 的输入 freshness 本身就是算法的一部分。
+
+#### 2.2.3 S3 GBPrefixBucket：代码里到底是哪一个 selector
+
+S3 对应 `src/prefill_cache_sim/selectors.py:182-194` 的 `gb_prefix_bucket_selector()`。它不是 FlexLB，也不是全局 batching 本身；“GB”表示用 Global Batching 风格的 prefix bucket owner 思路做的实验策略。
+
+```python
+return AffinitySelector(
+    PrefixAnchor(anchor_k),                  # M4 headline：k=2
+    CapacityGate(soft_alpha=1.25),           # owner load > 1.25 × cluster mean
+    BoundedFallback(max_secondary_candidates=2),
+    sticky=False,
+)
+```
+
+完整决策流程：
+
+```text
+request
+  → 取第 k 个 chained prefix block；短请求取最后一个
+  → SHA256(anchor) % N 得到 stable owner
+  → owner 未超过 hard／soft gate：选择 owner
+  → owner 过载：只检查 hash ring 后两个 secondary nodes
+  → secondary 都不合格：fail-open 到 cluster least-work
+```
+
+为什么它在 M4 headline 的 hit 高：
+
+1. 相同第 2 段 prefix 的请求稳定回到同一 owner，减少 cache fragmentation。
+2. replica factor 只有 1.045，Random 是约 1.23；有限容量被重复副本浪费得更少。
+3. 它不依赖每 100ms 才更新一次的 load 排名；owner 在 stale view 下仍稳定。
+
+为什么它不能直接部署为 winner：
+
+1. 热 prefix 的 stable owner 会持续集中流量，request load max／mean=1.822。
+2. `k=2` 是这条 trace 的经验点：k=1 hit 45.18%，k=4 hit 53.61%，k=16 hit 51.96%；不能外推到所有 workload。
+3. 100ms headline 中的 54.01% 包含“ownership 集中”的收益；fresh view 下 S3 只有 49.90%，而 S5 是 53.01%。
+4. M12 同名 S3 使用第 1 块 anchor，并非 M4 的 k=2 版本。
+
+#### 2.2.4 S4 SessionAffinity：没有 session_id，怎么做 session selector
+
+S4 对应 `session_affinity_selector()`＋`OnlineConversationLinker`。它不是读取真实 session；trace 没有这个字段。它只用过去看到的 prefix 构造 causal family proxy：
+
+```text
+从最长共享 prefix 向前查找
+  → 少于 minimum_shared_blocks：新 family
+  → 只由全局超热 blocks 构成：拒绝合并
+  → family 已到 size cap：切新 family
+  → 否则加入旧 family，并 sticky 到上次 owner
+```
+
+hot-only exclusion 防止公共 system prompt 把全流量合并成一个“假 session”；family cap 防止一个大 conversation family 永久霸占一台 node。M4 中它得到 53.34% hit、load max／mean 1.047、queue p95 3011：比 S3 少 0.67pp hit，但把严重偏斜压回近似均衡。因此在 delayed-view 契约里，S4 是比 S3 更合理的部署候选；生产中应把 proxy key 换成 privacy-safe hashed session key。
+
+#### 2.2.5 S5 FlexLB TTFT：为什么中心化 cache-aware 反而输给 S3
+
+S5 对应 `FlexLbTtftSelector`：
+
+```python
+load = running_tokens + queued_uncached_tokens
+hit = estimated_local_hit_tokens
+score = load + input_tokens - 0.7 * hit
+```
+
+它先按 score 排序，保留 top 30%，再取距 best 10% band 内最久未选的 node。直觉是：queue 少、local hit 多的 node 预计 TTFT 更短。
+
+M4 headline 中它看起来较差，主因不是公式，而是 **stale-view herding**：
+
+| View delay | S5 token hit | Load max／mean | Queue p95 |
+|---:|---:|---:|---:|
+| 0ms | **53.01%** | 1.272 | **1220** |
+| 50ms | 52.32% | 1.646 | 6589 |
+| 500ms | 52.32% | 1.646 | 6589 |
+| 5000ms | 51.33% | 1.558 | 9123 |
+
+`delay=0` 时，S5 在 hit 与 queue 两轴同时优于 S3／S4；50ms 后 queue 变成 5.4 倍。连用于打散选择的 `last_selected_ms` 也是快照字段，所以同一冻结窗口内的请求会重复选中同一个 node。discount 和 band 扫描只能改变个位数百分比，不能解释 5.4 倍退化。
+
+结论不是“FlexLB 不好”，而是：**中心化 cost selector 的实际能力上限由观测 freshness 决定。生产 FlexLB 是否存在同样问题仍是假说，需要对照真实 view refresh、RPC delay 与 node queue oscillation。**
+
+#### 2.2.6 S6 CalibratedTTFT：校准了什么，为什么没完全救回 S5
+
+S6 把 S5 的经验折扣改成单位一致的 uncached work：
+
+```python
+uncached = input_tokens - hit_tokens
+score_ms = (queue_tokens + uncached) * prefill_uncached_token_ms
+```
+
+它让公式更容易接入真实硬件 coefficient，也避免 `0.7 × hit` 的经验权重。M4 headline hit 从 S5 的 52.32% 回到 53.37%，skew 从 1.646 降到 1.269，但 queue p95 仍是 6393。原因是它校准了 score，没有修复 score 输入的 freshness；错误的新鲜度比错误的系数更致命。
+
+#### 2.2.7 一张图读懂 M4：没有单指标冠军
+
+| 策略 | Token hit | Request load max／mean | Queue p95 | 最诚实定位 |
+|---|---:|---:|---:|---|
+| S0 Random | 44.30% | 1.013 | 4097 | baseline |
+| S1 RR | 44.25% | **1.000** | 3876 | count balance baseline |
+| S2 LeastWork | 43.67% | 1.012 | **8061** | stale-view 反例 |
+| S3 GBPrefixBucket | **54.01%** | 1.822 | 3103 | locality ceiling probe |
+| S4 SessionAffinity | 53.34% | 1.047 | **3011** | delayed-view Pareto candidate |
+| S5 FlexLB TTFT | 52.32% | 1.646 | 6589 | fresh-view winner／stale-view loser |
+| S6 CalibratedTTFT | 53.37% | 1.269 | 6393 | 可标定 score，仍受 stale view 限制 |
+
+M4 的可迁移 insight 是一条切换规则：**view 可信时追 cost score；view 不可信时靠 stable ownership；两者之间用 overload gate、bounded choice 与 randomized tie-break 防 herd。**
+
+#### 2.2.8 M4 与 M12：同名策略为什么不能直接横比
+
+| 维度 | M4 | M12 placement grid | 解读限制 |
+|---|---|---|---|
+| Workload | 23,608 条 Mooncake trace | 同一 Mooncake trace＋合成 cost regimes；arrival scale=5.0 | workload 身份相同，但后续 contract 不同 |
+| View | 100ms delayed headline | causal exact view | S5 的主要弱点被移除 |
+| S3 anchor | 第 2 块 | 第 1 块 | 同名但不是同一变体 |
+| S4 | dynamic P99 hot threshold；cap=128 | cohort namespaced；cap=64 | family 语义不同 |
+| Cache pressure | 50k blocks＋LRU eviction | placement-only case 容量覆盖 keys | M12 placement hit 不测相同 eviction 压力 |
+| KVS | 无 remote | NORMAL／EXPENSIVE／DISABLED | S5/S6 在部分 cell 能 remote，但 score 未完整定价 transfer |
+| Candidate gate | alive nodes | cohort＋SLO eligibility | M12 所有策略先共享 prefilter |
+
+M12 已冻结的旧 placement artifact 只支持“在特定 COMPUTE_BOUND-DISABLED cell，S5 strict useful goodput=6.634、load=1.002，hit=56.794% 与 S4 的 56.788% 实质持平；S5 的明确优势在 goodput 与 P queue p95”。这里的 6.634 是 M12 自己的 normalized strict-useful-work rate，不能与 M6 的 0.4883 或 M7 的 0.14181 横比。它不能证明 S5 普适最佳，也不能与 M4 的 52.32% 直接作升降比较。当前 M12 final grid 正在运行；在完整 MANIFEST 与 gates 通过前，decode lease、census eviction、KVS contention 不发布收益结论。
+
+#### 2.2.9 KVS／SLO-aware：从“找 hit”升级为“给每个选择定价”
+
+面向大规模分布式系统，node selection 不应只问“哪里 hit 最长”，而要先过滤不可行候选，再比较完成请求的边际成本：
+
+```text
+request + model/adapter/work-shape + SLO slack
+  → cohort filter：只保留兼容 nodes
+  → SLO eligibility：排除 queue＋compute＋KVS contention 已超预算的 nodes
+  → 对每个候选算账：
+       queue_cost
+     + uncached_prefill_tokens × prefill_price
+     + remote_KV_tokens × KVS_price × contention_multiplier
+     + owner_break／fairness／risk penalty
+  → local reuse、remote fetch、recompute 三者取总成本最低
+  → 只在 safety gate 通过时 enforce；否则 shadow／fallback
+```
+
+Hybrid 使用 Mooncake 风格 threshold：只有 remote 方案相对 local recompute 的收益达到阈值才 transfer。PricedSpill 则把 transfer 直接放进统一 ledger。它的最大价值不是再多几个 hit points，而是允许 selector 在“粘住 cache 热点”和“打散后全部重算”之间选择第三条路：**把 KV 搬到空闲 node。**
+
+当前诚实结论：PricedSpill 的旧 G12-2 grid 为 13 个 `KILL_ENFORCEMENT`＋2 个 provisional duplicate pass，只能保留 shadow／ablation；KVS contention cell 曾经因实现问题没有产生因果差异，修复后的 final grid 尚未完成。因此统一成本框架值得继续，当前具体价格函数没有通过 enforcement gate。
 
 ### 2.3 Eviction：LRU 是 benchmark 主线，复杂策略是容量压力实验
 
@@ -213,7 +406,7 @@ D1 的恢复路径在 `decode_lease.py:174-221`；自适应 quantum 在 `decode_
 
 `+9.71 pp` 只表示 S3 相对 **Random** 的 locality mechanism gain，不能当作相对线上收益。M4 中 production-style cache-aware baseline 已达到 S5=52.32%、S6=53.37%；S3=54.01% 相对它们只有约 0.6～1.7 pp simulator headroom，S4=53.34% 与 S6 基本持平。DashScope 线上已有 FlexLB／Turbo cache-aware owner，因此任何“生产提升”目前都是 NOT_MEASURED，必须由 R1 shadow 给出。
 
-S4 更合理的 value statement 是：**在本次 replay 中，用约 0.67 pp token hit 代价，把 request load max/mean 从 1.822 降到 1.047，偏斜下降约 42.5%（或 S3 相对 S4 高约 74%）**。这里描述的是 simulator trade-off，不是生产收益。
+S4 更合理的 value statement 是：**在本次 replay 中，用约 0.67 pp token hit 代价，把 request load max/mean 从 1.822 降到 1.047；按原值降幅为 42.5%，按超出理想值 1.0 的 excess-skew 口径降幅约 94%**。这里描述的是 simulator trade-off，不是生产收益。
 
 ### 3.2 价值不是相加关系
 

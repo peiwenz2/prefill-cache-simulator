@@ -1,55 +1,2126 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Prefill Cache Simulator：策略价值与 benchmark 诚实性审计</title>
-<style>
-:root{--ink:#171a21;--bg:#f6f7f9;--surface:#fff;--line:#e4e7ec;--muted:#5b6472;--faint:#8a93a3;--accent:#4338ca;--accent-bg:#eef0fe;--ok:#15803d;--ok-bg:#e9f6ec;--warn:#b45309;--warn-bg:#fdf3e3;--bad:#b91c1c;--bad-bg:#fce9e9;--code:#f2f4f9;--code-ink:#2d3344;--mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;--sans:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 var(--sans)}header{background:#fff;border-bottom:1px solid var(--line)}.hero{max-width:1180px;margin:auto;padding:42px 32px}.pills{display:flex;gap:8px;flex-wrap:wrap}.pill{font:600 12px var(--mono);padding:4px 9px;border-radius:999px;background:var(--accent-bg);color:var(--accent)}h1{font-size:38px;line-height:1.18;margin:18px 0 12px}h1 em{font-style:normal;color:var(--accent)}.lead{font-size:18px;color:var(--muted);max-width:900px}.evidence{font:12px var(--mono);color:var(--faint);margin-top:15px}.layout{max-width:1180px;margin:auto;display:grid;grid-template-columns:210px minmax(0,1fr);gap:28px;padding:30px 32px 70px}nav{position:sticky;top:20px;height:max-content}nav a{display:block;padding:8px 10px;color:var(--muted);text-decoration:none;border-left:2px solid var(--line)}nav a.active{color:var(--accent);border-left-color:var(--accent);background:var(--accent-bg)}section{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:28px;margin-bottom:24px}h2{font-size:25px;margin:0 0 20px}.n{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:7px;background:var(--accent);color:white;font:700 14px var(--mono);margin-right:8px}h3{font-size:18px;margin:28px 0 12px}.call{border-left:4px solid var(--accent);background:var(--accent-bg);padding:16px 18px;border-radius:8px;margin:16px 0}.call.good{border-color:var(--ok);background:var(--ok-bg)}.call.warn{border-color:var(--warn);background:var(--warn-bg)}.label{font:700 11px var(--mono);letter-spacing:.08em;color:var(--accent)}ol,ul{padding-left:22px}li+li{margin-top:6px}table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:12px 0 20px;font-size:13px}th,td{text-align:left;vertical-align:top;padding:10px;border-bottom:1px solid var(--line)}th{background:#fafbfc;color:var(--muted);font-weight:650}tr:last-child td{border-bottom:0}.best{background:var(--ok-bg);color:#125d2e;font-weight:650}.risk{background:var(--warn-bg)}code,pre{font-family:var(--mono);background:var(--code);color:var(--code-ink)}code{padding:2px 5px;border-radius:4px}pre{padding:15px;border-radius:9px;overflow:auto;border:1px solid var(--line);font-size:12px}.figure{border:1px solid var(--line);border-radius:12px;background:#fafbfc;padding:14px;margin:16px 0}.caption{color:var(--muted);font-size:12px;margin-top:7px}.bar{height:18px;background:var(--accent-bg);border-radius:5px;overflow:hidden;min-width:150px}.bar i{display:block;height:100%;background:var(--accent)}.bar.ok i{background:var(--ok)}.narrow{max-width:760px}.value{font-size:21px;font-weight:750;color:var(--accent)}a{color:var(--accent)}@media(max-width:800px){.layout{grid-template-columns:1fr;padding:18px}nav{display:none}.hero{padding:30px 20px}h1{font-size:30px}section{padding:20px;overflow:auto}}
-</style></head><body>
-<header><div class="hero"><div class="pills"><span class="pill">P1</span><span class="pill">In Review</span><span class="pill">策略价值审计</span><span class="pill">作者：张珮文</span></div><h1>Prefill Cache Simulator：<em>哪部分最值钱</em></h1><p class="lead">把 Mooncake 原论文、数据库理论上限、M0–M11 已有结果与 M12 Goodput × Reuse 计划放进同一口径。逐项回答算法怎么走、收益从哪里来、瓶颈在哪里，以及 GPU／CPU／storage 淘汰模型是否 benchmark-faithful。</p><div class="evidence">M12 规划基线：prefill-cache-sim@c6f8376 ｜ 2026-08-06 ｜ 真实 GPU／KVT／production shadow 尚未完成</div></div></header>
-<div class="layout"><nav class="anchor-nav"><a href="#data">0．Data Description</a><a href="#arch">1．总体架构</a><a href="#design">2．详细设计</a><a href="#eval">3．关键技术评估</a><a href="#risk">4．风险与 benchmark</a><a href="#rollout">5．验收门</a><a href="#ref">6．引用</a></nav><main>
-<section id="data"><h2><span class="n">0</span>Data Description：这份 trace 给了什么</h2><div class="call"><div class="label">一句话</div>23,608 条 request，只暴露 arrival、input/output length 和 512-token chained prefix hashes。它能证明 exact-prefix reuse，不能恢复 token 内容或真实 session。</div>
-<h3>0.1 文件与四个原生字段</h3><table><thead><tr><th>字段</th><th>含义</th><th>可以推导</th><th>不能推导</th></tr></thead><tbody><tr><td><code>timestamp</code></td><td>相对到达 ms</td><td>arrival order／idle age</td><td>真实日期；同 ms 内先后</td></tr><tr><td><code>input_length</code></td><td>prompt tokens</td><td>prefill work／tail size</td><td>token 内容／template</td></tr><tr><td><code>output_length</code></td><td>decode tokens</td><td>decode work proxy</td><td>TPOT／finish reason</td></tr><tr><td><code>hash_ids</code></td><td>512-token chained prefix IDs</td><td>exact-prefix relationship</td><td>session_id／user_id</td></tr></tbody></table>
-<table><thead><tr><th>Dataset fact</th><th>固定 SHA 文件实测</th></tr></thead><tbody><tr><td>文件</td><td>4.2 MiB；SHA-256 <code>b434f181…f711</code></td></tr><tr><td>Requests／时间</td><td>23,608；0～3,600,000 ms；仅 1,180 个 unique timestamps</td></tr><tr><td>Input</td><td>202,791,701；mean 8,589.96；median 6,345；interpolated P95 26,078.55；890～125,546</td></tr><tr><td>Output</td><td>4,299,817；mean 182.13；median 30；P95 600；1～2,000</td></tr><tr><td>Blocks</td><td>409,356 references；183,166 unique IDs；23,581 requests 有 partial tail</td></tr></tbody></table><div class="call warn"><div class="label">论文与文件 diff</div>论文正文写 average input length 7,590；当前固定 SHA 文件为 202,791,701／23,608＝8,589.96。本仓以实际文件为准，不改数据去贴论文平均值。</div>
-<h3>0.2 512-token block 与 strict prefix</h3><div class="figure"><svg viewBox="0 0 900 205" width="100%"><defs><marker id="bd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#64748b"/></marker></defs><g font-family="-apple-system,PingFang SC"><rect x="30" y="55" width="155" height="56" rx="6" fill="#dbeafe" stroke="#1e40af"/><text x="107" y="79" text-anchor="middle" font-weight="650">Block 0</text><text x="107" y="98" text-anchor="middle" font-size="11">tokens 0…511</text><rect x="240" y="55" width="155" height="56" rx="6" fill="#dbeafe" stroke="#1e40af"/><text x="317" y="79" text-anchor="middle" font-weight="650">Block 1</text><text x="317" y="98" text-anchor="middle" font-size="11">H1=hash(H0,B1)</text><rect x="450" y="55" width="155" height="56" rx="6" fill="#fce9e9" stroke="#b91c1c"/><text x="527" y="79" text-anchor="middle" font-weight="650">Block 2 miss</text><text x="527" y="98" text-anchor="middle" font-size="11">prefix stops here</text><rect x="660" y="55" width="155" height="56" rx="6" fill="#f2f4f9" stroke="#8a93a3"/><text x="737" y="79" text-anchor="middle" font-weight="650">Block 3 resident</text><text x="737" y="98" text-anchor="middle" font-size="11">still not a hit</text><path d="M185 83L240 83M395 83L450 83M605 83L660 83" stroke="#64748b" marker-end="url(#bd)"/><text x="30" y="160" fill="#5b6472" font-size="12">input_length=6,755 → ceil(6755／512)=14 blocks；前 13 块各 512 tokens，tail=99 tokens。</text></g></svg><div class="caption">这张图回答：为什么后面的 resident block 不能跳着命中？每个 ID 链入前序 hash，缺一块就不再是相同 prefix。</div></div><p>Loader 在 <code>trace.py:104-120</code> 验证 block 数与 tail；lookup 在 <code>cache.py:45-71</code> 遇到首个 miss 立即停止。</p>
-<h3>0.3 两种 hit metric 与理论 ceiling</h3><table><thead><tr><th>Metric</th><th>公式</th><th>Infinite／no-expiry ceiling</th><th>不是</th></tr></thead><tbody><tr><td>Block-ref hit</td><td>连续命中 references／全部 references</td><td><strong>226,190／409,356＝55.2551%</strong></td><td>request hit rate</td></tr><tr><td>Token-weighted hit</td><td>连续命中实际 tokens／全部 input tokens</td><td><strong>115,733,271／202,791,701＝57.0700%</strong></td><td>TTFT improvement</td></tr></tbody></table><p>Token-weighted 对完整块计 512，对 tail 计真实 tokens。它更高，表示可复用部分更偏向完整长 block。实现见 <code>analyzer.py:68-92,121-124</code>。</p>
-<h3>0.4 Idle TTL：准确 assumptions</h3><div class="call warn"><div class="label">不是 Mooncake benchmark</div><ol><li><strong>Capacity infinite</strong>，没有 capacity eviction。</li><li><strong>Idle expire</strong>：<code>now-last_access &gt; TTL</code> 才过期。</li><li><strong>Hit renew</strong>：命中刷新 last access，等价于 LRU recency refresh。</li><li><strong>Strict prefix</strong>：第一个过期／缺失后停止。</li><li><strong>Instant insert</strong>：lookup 后按 trace timestamp 立即写入，不模拟 completion visibility。</li><li><strong>Single global namespace</strong>：没有 per-GPU placement 和 KVT cost。</li></ol></div>
-<table><thead><tr><th>Idle TTL</th><th>Block-ref hit</th><th>Token-weighted hit</th></tr></thead><tbody><tr><td>1 s</td><td>28.81%</td><td>29.77%</td></tr><tr><td>5 s</td><td>33.75%</td><td>34.89%</td></tr><tr><td>10 s</td><td>33.95%</td><td>35.08%</td></tr><tr><td>30 s</td><td>34.96%</td><td>36.12%</td></tr><tr><td>60 s</td><td>37.92%</td><td>39.17%</td></tr><tr><td>120 s</td><td>44.33%</td><td>45.79%</td></tr><tr><td>300 s</td><td>51.10%</td><td>52.78%</td></tr><tr><td>600 s</td><td>54.53%</td><td>56.33%</td></tr><tr><td>1,800 s</td><td>55.22%</td><td>57.04%</td></tr><tr class="best"><td>3,600 s／∞</td><td>55.26%</td><td>57.07%</td></tr></tbody></table><p>它只测 temporal locality 能跨多久。严格名字是 “infinite capacity＋idle expiry＋hit renew”，不能简称为 LRU capacity benchmark。</p>
-<h3>0.5 数据集能否判断 session</h3><div class="call"><div class="label">回答</div><strong>不能确定真实 session，只能推断 prefix family proxy。</strong>论文说采样时优先保留同 session 请求，但没有把 session label 放进 trace。</div><table><thead><tr><th>现象</th><th>为什么不能等同 session</th></tr></thead><tbody><tr><td>共享长 prefix</td><td>可能是同一 conversation，也可能是不同用户使用同一文档</td></tr><tr><td>共享第一块</td><td>depth=1 只有 4 families，最大 10,938 requests，主要是公共 system prompt</td></tr><tr><td>prefix 不同</td><td>同 session 也可能因 template／截断变化而 false split</td></tr><tr><td>相同 timestamp</td><td>22,428 个 adjacent same-time pairs，无法恢复毫秒内真实顺序</td></tr></tbody></table><p>S4 的 <code>OnlineConversationLinker</code> 只用历史 prefix，要求 minimum shared blocks，排除 hot-only prefix，并限制 family size（<code>affinity.py:37-114</code>）。它是 causal proxy；线上应换成 privacy-safe hashed session key。</p></section>
-<section id="arch"><h2><span class="n">1</span>总体架构</h2><div class="call"><div class="label">先给结论</div><ol><li>这份 trace 的 exact-prefix workload ceiling 是约 <strong>51%～57%</strong>，不是 90%；论文与本仓口径不同，禁止直接横比。</li><li>当前最确定的收益来自恢复 prefix locality：S3 比 Random 增加 <strong>9.71 pp</strong>。54.01% 是有限多节点 local，57.07% 是无限单池，94.6% 只作空间参照。</li><li>最值钱的不是某一个 selector，而是 KVS／SLO-aware request lifecycle；admission gate 与 ownership boundary 证据最强，remote／D2 尚弱。</li><li>Decode lease 目前只证明能救单 D node 病理 HoL，不是 always-on winner。</li><li>当前模型适合策略排序，不等于 Mooncake hardware reproduction。</li></ol></div>
-<div class="figure"><svg viewBox="0 0 900 360" width="100%" role="img" aria-label="端到端控制闭环"><defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#64748b"/></marker><marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#15803d"/></marker></defs>
-<g font-family="-apple-system,PingFang SC"><rect x="25" y="55" width="145" height="58" rx="6" fill="#dbeafe" stroke="#1e40af"/><text x="97" y="80" text-anchor="middle" font-weight="650">Request</text><text x="97" y="99" text-anchor="middle" font-size="11">prefix＋SLO</text><rect x="225" y="55" width="165" height="58" rx="6" fill="#fed7aa" stroke="#c2410c"/><text x="307" y="80" text-anchor="middle" font-weight="650">WHERE selector</text><text x="307" y="99" text-anchor="middle" font-size="11">queue＋cache cost</text><rect x="455" y="55" width="145" height="58" rx="6" fill="#dbeafe" stroke="#1e40af"/><text x="527" y="80" text-anchor="middle" font-weight="650">Prefill</text><text x="527" y="99" text-anchor="middle" font-size="11">incremental compute</text><rect x="680" y="55" width="160" height="58" rx="6" fill="#dbeafe" stroke="#1e40af"/><text x="760" y="80" text-anchor="middle" font-weight="650">Decode lifecycle</text><text x="760" y="99" text-anchor="middle" font-size="11">lease／checkpoint</text>
-<path d="M170 84L225 84M390 84L455 84M600 84L680 84" stroke="#64748b" marker-end="url(#a)" fill="none"/>
-<rect x="360" y="205" width="180" height="58" rx="6" fill="#d1fae5" stroke="#15803d"/><text x="450" y="230" text-anchor="middle" font-weight="650">CPU DRAM／KVS</text><text x="450" y="249" text-anchor="middle" font-size="11">paged blocks＋holders</text><rect x="625" y="205" width="165" height="58" rx="6" fill="#eef0fe" stroke="#4338ca"/><text x="707" y="230" text-anchor="middle" font-weight="650">Lifecycle planner</text><text x="707" y="249" text-anchor="middle" font-size="11">keep／boundary／move</text><path d="M527 113L527 180L450 180L450 205" stroke="#15803d" stroke-dasharray="6 3" marker-end="url(#g)" fill="none"/><path d="M540 234L625 234" stroke="#15803d" stroke-dasharray="6 3" marker-end="url(#g)"/><path d="M760 113L760 180L707 180L707 205" stroke="#64748b" marker-end="url(#a)" fill="none"/><path d="M625 250L180 250L180 115L225 115" stroke="#64748b" stroke-dasharray="5 3" marker-end="url(#a)" fill="none"/><text x="330" y="242" font-size="11" fill="#5b6472">continuation／resume 重新决策</text></g></svg><div class="caption">这张图回答：最有价值的闭环在哪里？它跨越 selector、KVS 与 decode lifecycle，而不是停在 hit rate。</div></div>
-<table><thead><tr><th>Ceiling</th><th>数值</th><th>正确含义</th><th>错误用法</th></tr></thead><tbody><tr><td>Mooncake global LRU Inf</td><td>51%</td><td>论文单 global pool 口径</td><td>直接当多节点 local selector 上限</td></tr><tr><td>本仓 block-ref</td><td>55.255%</td><td>连续 block reference reuse</td><td>当 token 节省率</td></tr><tr><td>本仓 token-weighted</td><td>57.070%</td><td>exact prefix 可省 input tokens</td><td>当 TTFT／goodput</td></tr><tr><td>90% reuse</td><td>另一 workload</td><td>chat-to-paper 重复长上下文</td><td>当 arxiv trace 目标</td></tr></tbody></table></section>
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Prefill Cache Simulator：从零理解策略、结果与价值</title>
+    <style>
+      :root {
+        --ink: #171a21;
+        --bg: #f6f7f9;
+        --surface: #fff;
+        --line: #e4e7ec;
+        --muted: #5b6472;
+        --faint: #8a93a3;
+        --accent: #4338ca;
+        --accent-bg: #eef0fe;
+        --ok: #15803d;
+        --ok-bg: #e9f6ec;
+        --warn: #b45309;
+        --warn-bg: #fdf3e3;
+        --bad: #b91c1c;
+        --bad-bg: #fce9e9;
+        --code: #f2f4f9;
+        --code-ink: #2d3344;
+        --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+        --sans: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font: 15px/1.65 var(--sans);
+      }
+      header {
+        background: #fff;
+        border-bottom: 1px solid var(--line);
+      }
+      .hero {
+        max-width: 1180px;
+        margin: auto;
+        padding: 42px 32px;
+      }
+      .pills {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .pill {
+        font: 600 12px var(--mono);
+        padding: 4px 9px;
+        border-radius: 999px;
+        background: var(--accent-bg);
+        color: var(--accent);
+      }
+      h1 {
+        font-size: 38px;
+        line-height: 1.18;
+        margin: 18px 0 12px;
+      }
+      h1 em {
+        font-style: normal;
+        color: var(--accent);
+      }
+      .lead {
+        font-size: 18px;
+        color: var(--muted);
+        max-width: 900px;
+      }
+      .evidence {
+        font: 12px var(--mono);
+        color: var(--faint);
+        margin-top: 15px;
+      }
+      .layout {
+        max-width: 1180px;
+        margin: auto;
+        display: grid;
+        grid-template-columns: 210px minmax(0, 1fr);
+        gap: 28px;
+        padding: 30px 32px 70px;
+      }
+      nav {
+        position: sticky;
+        top: 20px;
+        height: max-content;
+      }
+      nav a {
+        display: block;
+        padding: 8px 10px;
+        color: var(--muted);
+        text-decoration: none;
+        border-left: 2px solid var(--line);
+      }
+      nav a.active {
+        color: var(--accent);
+        border-left-color: var(--accent);
+        background: var(--accent-bg);
+      }
+      section {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 28px;
+        margin-bottom: 24px;
+      }
+      h2 {
+        font-size: 25px;
+        margin: 0 0 20px;
+      }
+      .n {
+        display: inline-grid;
+        place-items: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+        background: var(--accent);
+        color: white;
+        font: 700 14px var(--mono);
+        margin-right: 8px;
+      }
+      h3 {
+        font-size: 18px;
+        margin: 28px 0 12px;
+      }
+      .call {
+        border-left: 4px solid var(--accent);
+        background: var(--accent-bg);
+        padding: 16px 18px;
+        border-radius: 8px;
+        margin: 16px 0;
+      }
+      .call.good {
+        border-color: var(--ok);
+        background: var(--ok-bg);
+      }
+      .call.warn {
+        border-color: var(--warn);
+        background: var(--warn-bg);
+      }
+      .label {
+        font: 700 11px var(--mono);
+        letter-spacing: 0.08em;
+        color: var(--accent);
+      }
+      ol,
+      ul {
+        padding-left: 22px;
+      }
+      li + li {
+        margin-top: 6px;
+      }
+      table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        overflow: hidden;
+        margin: 12px 0 20px;
+        font-size: 13px;
+      }
+      th,
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 10px;
+        border-bottom: 1px solid var(--line);
+      }
+      th {
+        background: #fafbfc;
+        color: var(--muted);
+        font-weight: 650;
+      }
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      .best {
+        background: var(--ok-bg);
+        color: #125d2e;
+        font-weight: 650;
+      }
+      .risk {
+        background: var(--warn-bg);
+      }
+      code,
+      pre {
+        font-family: var(--mono);
+        background: var(--code);
+        color: var(--code-ink);
+      }
+      code {
+        padding: 2px 5px;
+        border-radius: 4px;
+      }
+      pre {
+        padding: 15px;
+        border-radius: 9px;
+        overflow: auto;
+        border: 1px solid var(--line);
+        font-size: 12px;
+      }
+      .figure {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fafbfc;
+        padding: 14px;
+        margin: 16px 0;
+      }
+      .caption {
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 7px;
+      }
+      .bar {
+        height: 18px;
+        background: var(--accent-bg);
+        border-radius: 5px;
+        overflow: hidden;
+        min-width: 150px;
+      }
+      .bar i {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+      }
+      .bar.ok i {
+        background: var(--ok);
+      }
+      .narrow {
+        max-width: 760px;
+      }
+      .value {
+        font-size: 21px;
+        font-weight: 750;
+        color: var(--accent);
+      }
+      a {
+        color: var(--accent);
+      }
+      @media (max-width: 800px) {
+        .layout {
+          grid-template-columns: 1fr;
+          padding: 18px;
+        }
+        nav {
+          display: none;
+        }
+        .hero {
+          padding: 30px 20px;
+        }
+        h1 {
+          font-size: 30px;
+        }
+        section {
+          padding: 20px;
+          overflow: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="hero">
+        <div class="pills">
+          <span class="pill">Evidence Review</span
+          ><span class="pill">M12 Running</span
+          ><span class="pill">零背景讲解版</span
+          ><span class="pill">作者：张珮文</span>
+        </div>
+        <h1>
+          Prefill Cache Simulator：<em>从“命中”走到 completed goodput</em>
+        </h1>
+        <p class="lead">
+          从零解释 prefill、KV cache 和 node selector，再逐项拆解
+          S0～S6、KVS／SLO-aware placement 与 decode
+          lifecycle。每个策略都回答：代码在哪里、决策怎么走、收益为何出现、在哪些条件下会失败。
+        </p>
+        <div class="evidence">
+          证据版本：prefill-cache-sim@51e7aea ｜ 2026-08-07 ｜ M12 final grid
+          正在运行；未完成结果不进入结论
+        </div>
+      </div>
+    </header>
+    <div class="layout">
+      <nav class="anchor-nav">
+        <a href="#data">0．Data Description</a><a href="#arch">1．总体架构</a
+        ><a href="#design">2．详细设计</a><a href="#eval">3．关键技术评估</a
+        ><a href="#risk">4．风险与 benchmark</a><a href="#rollout">5．验收门</a
+        ><a href="#ref">6．引用</a>
+      </nav>
+      <main>
+        <section id="glossary">
+          <h2><span class="n">A</span>先读这张术语卡</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>词</th>
+                <th>零背景解释</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Prefill</td>
+                <td>
+                  把输入 prompt 算成后续生成需要的 KV 状态；输入越长，计算越贵
+                </td>
+              </tr>
+              <tr>
+                <td>KV cache</td>
+                <td>保存已算过的 prefix 状态；重复前缀可以少算一段</td>
+              </tr>
+              <tr>
+                <td>Selector</td>
+                <td>
+                  为请求选择 prefill node；每台 node 的 local cache 与 queue
+                  不同
+                </td>
+              </tr>
+              <tr>
+                <td>KVT</td>
+                <td>KV Transfer，把 KV 状态从一台 node／一层存储搬到另一处</td>
+              </tr>
+              <tr>
+                <td>P stream／D stream</td>
+                <td>Prefill 计算流／Decode 逐 token 生成流</td>
+              </tr>
+              <tr>
+                <td>HoL blocking</td>
+                <td>Head-of-line blocking；一个长请求挡住后面的短请求</td>
+              </tr>
+              <tr>
+                <td>Goodput</td>
+                <td>
+                  在 SLO 内完成的有效工作；不同 milestone
+                  的归一化公式不同，不能跨表横比
+                </td>
+              </tr>
+              <tr>
+                <td>Load max／mean</td>
+                <td>最忙 node／集群平均；1.0 最均衡，越大越偏斜</td>
+              </tr>
+              <tr>
+                <td>Queue p95</td>
+                <td>M4 的 95 分位排队 token-work；不是毫秒</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+        <section id="data">
+          <h2><span class="n">0</span>Data Description：这份 trace 给了什么</h2>
+          <div class="call">
+            <div class="label">一句话</div>
+            23,608 条 request，只暴露 arrival、input/output length 和 512-token
+            chained prefix hashes。它能证明 exact-prefix reuse，不能恢复 token
+            内容或真实 session。
+          </div>
+          <h3>0.1 文件与四个原生字段</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>字段</th>
+                <th>含义</th>
+                <th>可以推导</th>
+                <th>不能推导</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>timestamp</code></td>
+                <td>相对到达 ms</td>
+                <td>arrival order／idle age</td>
+                <td>真实日期；同 ms 内先后</td>
+              </tr>
+              <tr>
+                <td><code>input_length</code></td>
+                <td>prompt tokens</td>
+                <td>prefill work／tail size</td>
+                <td>token 内容／template</td>
+              </tr>
+              <tr>
+                <td><code>output_length</code></td>
+                <td>decode tokens</td>
+                <td>decode work proxy</td>
+                <td>TPOT／finish reason</td>
+              </tr>
+              <tr>
+                <td><code>hash_ids</code></td>
+                <td>512-token chained prefix IDs</td>
+                <td>exact-prefix relationship</td>
+                <td>session_id／user_id</td>
+              </tr>
+            </tbody>
+          </table>
+          <table>
+            <thead>
+              <tr>
+                <th>Dataset fact</th>
+                <th>固定 SHA 文件实测</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>文件</td>
+                <td>4.2 MiB；SHA-256 <code>b434f181…f711</code></td>
+              </tr>
+              <tr>
+                <td>Requests／时间</td>
+                <td>23,608；0～3,600,000 ms；仅 1,180 个 unique timestamps</td>
+              </tr>
+              <tr>
+                <td>Input</td>
+                <td>
+                  202,791,701；mean 8,589.96；median 6,345；interpolated P95
+                  26,078.55；890～125,546
+                </td>
+              </tr>
+              <tr>
+                <td>Output</td>
+                <td>4,299,817；mean 182.13；median 30；P95 600；1～2,000</td>
+              </tr>
+              <tr>
+                <td>Blocks</td>
+                <td>
+                  409,356 references；183,166 unique IDs；23,581 requests 有
+                  partial tail
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="call warn">
+            <div class="label">论文与文件 diff</div>
+            论文正文写 average input length 7,590；当前固定 SHA 文件为
+            202,791,701／23,608＝8,589.96。本仓以实际文件为准，不改数据去贴论文平均值。
+          </div>
+          <h3>0.2 512-token block 与 strict prefix</h3>
+          <div class="figure">
+            <svg
+              viewBox="0 0 900 205"
+              width="100%"
+              role="img"
+              aria-label="Strict prefix 命中：中间 block miss 后，后续 resident block 也不能计为命中"
+            >
+              <defs>
+                <marker
+                  id="bd"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto"
+                >
+                  <path d="M0 0L10 5L0 10z" fill="#64748b" />
+                </marker>
+              </defs>
+              <g font-family="-apple-system,PingFang SC">
+                <rect
+                  x="30"
+                  y="55"
+                  width="155"
+                  height="56"
+                  rx="6"
+                  fill="#dbeafe"
+                  stroke="#1e40af"
+                />
+                <text x="107" y="79" text-anchor="middle" font-weight="650">
+                  Block 0
+                </text>
+                <text x="107" y="98" text-anchor="middle" font-size="11">
+                  tokens 0…511
+                </text>
+                <rect
+                  x="240"
+                  y="55"
+                  width="155"
+                  height="56"
+                  rx="6"
+                  fill="#dbeafe"
+                  stroke="#1e40af"
+                />
+                <text x="317" y="79" text-anchor="middle" font-weight="650">
+                  Block 1
+                </text>
+                <text x="317" y="98" text-anchor="middle" font-size="11">
+                  H1=hash(H0,B1)
+                </text>
+                <rect
+                  x="450"
+                  y="55"
+                  width="155"
+                  height="56"
+                  rx="6"
+                  fill="#fce9e9"
+                  stroke="#b91c1c"
+                />
+                <text x="527" y="79" text-anchor="middle" font-weight="650">
+                  Block 2 miss
+                </text>
+                <text x="527" y="98" text-anchor="middle" font-size="11">
+                  prefix stops here
+                </text>
+                <rect
+                  x="660"
+                  y="55"
+                  width="155"
+                  height="56"
+                  rx="6"
+                  fill="#f2f4f9"
+                  stroke="#8a93a3"
+                />
+                <text x="737" y="79" text-anchor="middle" font-weight="650">
+                  Block 3 resident
+                </text>
+                <text x="737" y="98" text-anchor="middle" font-size="11">
+                  still not a hit
+                </text>
+                <path
+                  d="M185 83L240 83M395 83L450 83M605 83L660 83"
+                  stroke="#64748b"
+                  marker-end="url(#bd)"
+                />
+                <text x="30" y="160" fill="#5b6472" font-size="12">
+                  input_length=6,755 → ceil(6755／512)=14 blocks；前 13 块各 512
+                  tokens，tail=99 tokens。
+                </text>
+              </g>
+            </svg>
+            <div class="caption">
+              这张图回答：为什么后面的 resident block 不能跳着命中？每个 ID
+              链入前序 hash，缺一块就不再是相同 prefix。
+            </div>
+          </div>
+          <p>
+            Loader 在 <code>trace.py:104-120</code> 验证 block 数与 tail；lookup
+            在 <code>cache.py:45-71</code> 遇到首个 miss 立即停止。
+          </p>
+          <h3>0.3 两种 hit metric 与理论 ceiling</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Metric</th>
+                <th>公式</th>
+                <th>Infinite／no-expiry ceiling</th>
+                <th>不是</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Block-ref hit</td>
+                <td>连续命中 references／全部 references</td>
+                <td><strong>226,190／409,356＝55.2551%</strong></td>
+                <td>request hit rate</td>
+              </tr>
+              <tr>
+                <td>Token-weighted hit</td>
+                <td>连续命中实际 tokens／全部 input tokens</td>
+                <td><strong>115,733,271／202,791,701＝57.0700%</strong></td>
+                <td>TTFT improvement</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            Token-weighted 对完整块计 512，对 tail 计真实
+            tokens。它更高，表示可复用部分更偏向完整长 block。实现见
+            <code>analyzer.py:68-92,121-124</code>。
+          </p>
+          <h3>0.4 Idle TTL：准确 assumptions</h3>
+          <div class="call warn">
+            <div class="label">不是 Mooncake benchmark</div>
+            <ol>
+              <li>
+                <strong>Capacity infinite</strong>，没有 capacity eviction。
+              </li>
+              <li>
+                <strong>Idle expire</strong>：<code
+                  >now-last_access &gt; TTL</code
+                >
+                才过期。
+              </li>
+              <li>
+                <strong>Hit renew</strong>：命中刷新 last access，等价于 LRU
+                recency refresh。
+              </li>
+              <li><strong>Strict prefix</strong>：第一个过期／缺失后停止。</li>
+              <li>
+                <strong>Instant insert</strong>：lookup 后按 trace timestamp
+                立即写入，不模拟 completion visibility。
+              </li>
+              <li>
+                <strong>Single global namespace</strong>：没有 per-GPU placement
+                和 KVT cost。
+              </li>
+            </ol>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Idle TTL</th>
+                <th>Block-ref hit</th>
+                <th>Token-weighted hit</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>1 s</td>
+                <td>28.81%</td>
+                <td>29.77%</td>
+              </tr>
+              <tr>
+                <td>5 s</td>
+                <td>33.75%</td>
+                <td>34.89%</td>
+              </tr>
+              <tr>
+                <td>10 s</td>
+                <td>33.95%</td>
+                <td>35.08%</td>
+              </tr>
+              <tr>
+                <td>30 s</td>
+                <td>34.96%</td>
+                <td>36.12%</td>
+              </tr>
+              <tr>
+                <td>60 s</td>
+                <td>37.92%</td>
+                <td>39.17%</td>
+              </tr>
+              <tr>
+                <td>120 s</td>
+                <td>44.33%</td>
+                <td>45.79%</td>
+              </tr>
+              <tr>
+                <td>300 s</td>
+                <td>51.10%</td>
+                <td>52.78%</td>
+              </tr>
+              <tr>
+                <td>600 s</td>
+                <td>54.53%</td>
+                <td>56.33%</td>
+              </tr>
+              <tr>
+                <td>1,800 s</td>
+                <td>55.22%</td>
+                <td>57.04%</td>
+              </tr>
+              <tr class="best">
+                <td>3,600 s／∞</td>
+                <td>55.26%</td>
+                <td>57.07%</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            它只测 temporal locality 能跨多久。严格名字是 “infinite
+            capacity＋idle expiry＋hit renew”，不能简称为 LRU capacity
+            benchmark。
+          </p>
+          <h3>0.5 数据集能否判断 session</h3>
+          <div class="call">
+            <div class="label">回答</div>
+            <strong>不能确定真实 session，只能推断 prefix family proxy。</strong
+            >论文说采样时优先保留同 session 请求，但没有把 session label 放进
+            trace。
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>现象</th>
+                <th>为什么不能等同 session</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>共享长 prefix</td>
+                <td>可能是同一 conversation，也可能是不同用户使用同一文档</td>
+              </tr>
+              <tr>
+                <td>共享第一块</td>
+                <td>
+                  depth=1 只有 4 families，最大 10,938 requests，主要是公共
+                  system prompt
+                </td>
+              </tr>
+              <tr>
+                <td>prefix 不同</td>
+                <td>同 session 也可能因 template／截断变化而 false split</td>
+              </tr>
+              <tr>
+                <td>相同 timestamp</td>
+                <td>
+                  22,428 个 adjacent same-time pairs，无法恢复毫秒内真实顺序
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            S4 的 <code>OnlineConversationLinker</code> 只用历史 prefix，要求
+            minimum shared blocks，排除 hot-only prefix，并限制 family
+            size（<code>affinity.py:37-114</code>）。它是 causal
+            proxy；线上应换成 privacy-safe hashed session key。
+          </p>
+        </section>
+        <section id="arch">
+          <h2><span class="n">1</span>总体架构：先从零理解问题</h2>
+          <div class="call">
+            <div class="label">30 秒版本</div>
+            <ul>
+              <li>
+                <strong>Prefill</strong> 把输入 prompt 算成 KV 状态；<strong
+                  >Decode</strong
+                >
+                用这些状态逐 token 生成答案。
+              </li>
+              <li>
+                长 prompt 的 prefill 很贵；新请求若共享旧请求的开头，可以复用
+                prefix KV blocks。
+              </li>
+              <li>
+                每台 prefill node 的 local cache 不一样。相同 prefix 被发到不同
+                node，集群明明算过，当前 node 仍会 miss。
+              </li>
+              <li>
+                Selector 必须同时优化 reuse 与 queue：只追 hit 会形成
+                hotspot，只追最闲会打散 cache。
+              </li>
+            </ul>
+          </div>
+          <div class="figure">
+            <svg
+              viewBox="0 0 960 245"
+              width="100%"
+              role="img"
+              aria-label="请求、路由和独立缓存"
+            >
+              <defs>
+                <marker
+                  id="z"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto"
+                >
+                  <path d="M0 0L10 5L0 10z" fill="#64748b" />
+                </marker>
+              </defs>
+              <g font-family="-apple-system,PingFang SC">
+                <rect
+                  x="20"
+                  y="70"
+                  width="155"
+                  height="62"
+                  rx="7"
+                  fill="#eef0fe"
+                  stroke="#4338ca"
+                />
+                <text x="97" y="95" text-anchor="middle" font-weight="700">
+                  Request
+                </text>
+                <text x="97" y="116" text-anchor="middle" font-size="12">
+                  512-token blocks
+                </text>
+                <rect
+                  x="230"
+                  y="70"
+                  width="155"
+                  height="62"
+                  rx="7"
+                  fill="#fdf3e3"
+                  stroke="#b45309"
+                />
+                <text x="307" y="95" text-anchor="middle" font-weight="700">
+                  Selector
+                </text>
+                <text x="307" y="116" text-anchor="middle" font-size="12">
+                  reuse × queue
+                </text>
+                <rect
+                  x="465"
+                  y="25"
+                  width="180"
+                  height="62"
+                  rx="7"
+                  fill="#e9f6ec"
+                  stroke="#15803d"
+                />
+                <text x="555" y="50" text-anchor="middle" font-weight="700">
+                  Prefill node A
+                </text>
+                <text x="555" y="71" text-anchor="middle" font-size="12">
+                  local cache：A／B／C
+                </text>
+                <rect
+                  x="465"
+                  y="148"
+                  width="180"
+                  height="62"
+                  rx="7"
+                  fill="#f2f4f9"
+                  stroke="#8a93a3"
+                />
+                <text x="555" y="173" text-anchor="middle" font-weight="700">
+                  Prefill node B
+                </text>
+                <text x="555" y="194" text-anchor="middle" font-size="12">
+                  local cache：A／D／E
+                </text>
+                <rect
+                  x="720"
+                  y="70"
+                  width="190"
+                  height="62"
+                  rx="7"
+                  fill="#eef0fe"
+                  stroke="#4338ca"
+                />
+                <text x="815" y="95" text-anchor="middle" font-weight="700">
+                  Prefill + Decode
+                </text>
+                <text x="815" y="116" text-anchor="middle" font-size="12">
+                  miss 重算；hit 复用
+                </text>
+                <path
+                  d="M175 101L230 101M385 101L445 56L465 56M385 101L445 179L465 179M645 56L700 85L720 101M645 179L700 117L720 101"
+                  stroke="#64748b"
+                  fill="none"
+                  marker-end="url(#z)"
+                />
+              </g>
+            </svg>
+            <div class="caption">
+              同一个 block 可能同时存在于多台 node；稳定 owner 减少副本，但热
+              owner 也可能排队。
+            </div>
+          </div>
+          <div class="call">
+            <div class="label">先给结论</div>
+            <ol>
+              <li>
+                这份 trace 的 exact-prefix workload ceiling 是约
+                <strong>51%～57%</strong>，不是
+                90%；论文与本仓口径不同，禁止直接横比。
+              </li>
+              <li>
+                没有无条件 winner：100ms delayed view 下 S3 hit 最高；fresh view
+                下 S5 同时拿到更高 hit 与更低 queue。
+              </li>
+              <li>
+                生产上最值得验证的是“fresh view 用 cost score，stale view 用
+                stable ownership”，再用 overload gate 与 bounded choice
+                连接两者。
+              </li>
+              <li>
+                最值钱的长期方向是 KVS／SLO-aware request
+                lifecycle，而不是单独追 hit。
+              </li>
+              <li>
+                当前模型适合策略排序，不等于 Mooncake hardware reproduction。
+              </li>
+            </ol>
+          </div>
+          <div class="figure">
+            <svg
+              viewBox="0 0 900 360"
+              width="100%"
+              role="img"
+              aria-label="端到端控制闭环"
+            >
+              <defs>
+                <marker
+                  id="a"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto"
+                >
+                  <path d="M0 0L10 5L0 10z" fill="#64748b" />
+                </marker>
+                <marker
+                  id="g"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto"
+                >
+                  <path d="M0 0L10 5L0 10z" fill="#15803d" />
+                </marker>
+              </defs>
+              <g font-family="-apple-system,PingFang SC">
+                <rect
+                  x="25"
+                  y="55"
+                  width="145"
+                  height="58"
+                  rx="6"
+                  fill="#dbeafe"
+                  stroke="#1e40af"
+                />
+                <text x="97" y="80" text-anchor="middle" font-weight="650">
+                  Request
+                </text>
+                <text x="97" y="99" text-anchor="middle" font-size="11">
+                  prefix＋SLO
+                </text>
+                <rect
+                  x="225"
+                  y="55"
+                  width="165"
+                  height="58"
+                  rx="6"
+                  fill="#fed7aa"
+                  stroke="#c2410c"
+                />
+                <text x="307" y="80" text-anchor="middle" font-weight="650">
+                  WHERE selector
+                </text>
+                <text x="307" y="99" text-anchor="middle" font-size="11">
+                  queue＋cache cost
+                </text>
+                <rect
+                  x="455"
+                  y="55"
+                  width="145"
+                  height="58"
+                  rx="6"
+                  fill="#dbeafe"
+                  stroke="#1e40af"
+                />
+                <text x="527" y="80" text-anchor="middle" font-weight="650">
+                  Prefill
+                </text>
+                <text x="527" y="99" text-anchor="middle" font-size="11">
+                  incremental compute
+                </text>
+                <rect
+                  x="680"
+                  y="55"
+                  width="160"
+                  height="58"
+                  rx="6"
+                  fill="#dbeafe"
+                  stroke="#1e40af"
+                />
+                <text x="760" y="80" text-anchor="middle" font-weight="650">
+                  Decode lifecycle
+                </text>
+                <text x="760" y="99" text-anchor="middle" font-size="11">
+                  lease／checkpoint
+                </text>
+                <path
+                  d="M170 84L225 84M390 84L455 84M600 84L680 84"
+                  stroke="#64748b"
+                  marker-end="url(#a)"
+                  fill="none"
+                />
+                <rect
+                  x="360"
+                  y="205"
+                  width="180"
+                  height="58"
+                  rx="6"
+                  fill="#d1fae5"
+                  stroke="#15803d"
+                />
+                <text x="450" y="230" text-anchor="middle" font-weight="650">
+                  CPU DRAM／KVS
+                </text>
+                <text x="450" y="249" text-anchor="middle" font-size="11">
+                  paged blocks＋holders
+                </text>
+                <rect
+                  x="625"
+                  y="205"
+                  width="165"
+                  height="58"
+                  rx="6"
+                  fill="#eef0fe"
+                  stroke="#4338ca"
+                />
+                <text x="707" y="230" text-anchor="middle" font-weight="650">
+                  Lifecycle planner
+                </text>
+                <text x="707" y="249" text-anchor="middle" font-size="11">
+                  keep／boundary／move
+                </text>
+                <path
+                  d="M527 113L527 180L450 180L450 205"
+                  stroke="#15803d"
+                  stroke-dasharray="6 3"
+                  marker-end="url(#g)"
+                  fill="none"
+                />
+                <path
+                  d="M540 234L625 234"
+                  stroke="#15803d"
+                  stroke-dasharray="6 3"
+                  marker-end="url(#g)"
+                />
+                <path
+                  d="M760 113L760 180L707 180L707 205"
+                  stroke="#64748b"
+                  marker-end="url(#a)"
+                  fill="none"
+                />
+                <path
+                  d="M625 250L180 250L180 115L225 115"
+                  stroke="#64748b"
+                  stroke-dasharray="5 3"
+                  marker-end="url(#a)"
+                  fill="none"
+                />
+                <text x="330" y="242" font-size="11" fill="#5b6472">
+                  continuation／resume 重新决策
+                </text>
+              </g>
+            </svg>
+            <div class="caption">
+              这张图回答：最有价值的闭环在哪里？它跨越 selector、KVS 与 decode
+              lifecycle，而不是停在 hit rate。
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Ceiling</th>
+                <th>数值</th>
+                <th>正确含义</th>
+                <th>错误用法</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Mooncake global LRU Inf</td>
+                <td>51%</td>
+                <td>论文单 global pool 口径</td>
+                <td>直接当多节点 local selector 上限</td>
+              </tr>
+              <tr>
+                <td>本仓 block-ref</td>
+                <td>55.255%</td>
+                <td>连续 block reference reuse</td>
+                <td>当 token 节省率</td>
+              </tr>
+              <tr>
+                <td>本仓 token-weighted</td>
+                <td>57.070%</td>
+                <td>exact prefix 可省 input tokens</td>
+                <td>当 TTFT／goodput</td>
+              </tr>
+              <tr>
+                <td>90% reuse</td>
+                <td>另一 workload</td>
+                <td>chat-to-paper 重复长上下文</td>
+                <td>当 arxiv trace 目标</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
 
-<section id="design"><h2><span class="n">2</span>详细设计：策略逐项审计</h2><h3>2.1 Selector：最大收益与约束</h3>
-<table><thead><tr><th>策略</th><th>核心规则</th><th>Token hit</th><th>最大收益点</th><th>瓶颈</th></tr></thead><tbody><tr><td>S0 Random</td><td>均匀随机</td><td>44.30%</td><td>无偏 baseline</td><td>打散 locality</td></tr><tr><td>S1 RoundRobin</td><td>请求轮转</td><td>44.25%</td><td>request load=1.0</td><td>不看 token work</td></tr><tr><td>S2 LeastWork</td><td>最少 running＋queued tokens</td><td>43.67%</td><td>负载感知</td><td>命中最低</td></tr><tr class="best"><td>S3 GBPrefixBucket</td><td>prefix anchor stable owner＋bounded fallback</td><td>54.01%</td><td>+9.71 pp，最接近 ceiling</td><td>load max/mean=1.822</td></tr><tr><td>S4 SessionAffinity</td><td>online link＋sticky owner</td><td>53.34%</td><td>load max/mean=1.047</td><td>session 是 trace proxy</td></tr><tr><td>S5 FlexLbTtft</td><td>queue＋input−0.7×hit</td><td>52.32%</td><td>表达 cache/load trade-off</td><td>queue p95=6589，stop-gated</td></tr><tr><td>S6 CalibratedTtft</td><td>(load＋uncached)×coefficient</td><td>53.37%</td><td>接近 Mooncake TTFT score</td><td>尚无 hardware coefficient</td></tr></tbody></table>
-<pre># selectors.py:218-238
+        <section id="design">
+          <h2><span class="n">2</span>详细设计：策略逐项审计</h2>
+          <h3>2.1 Selector：最大收益与约束</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>策略</th>
+                <th>核心规则</th>
+                <th>100ms token-weighted hit</th>
+                <th>最大收益点</th>
+                <th>瓶颈</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>S0 Random</td>
+                <td>均匀随机</td>
+                <td>44.30%</td>
+                <td>无偏 baseline</td>
+                <td>打散 locality</td>
+              </tr>
+              <tr>
+                <td>S1 RoundRobin</td>
+                <td>请求轮转</td>
+                <td>44.25%</td>
+                <td>request load=1.0</td>
+                <td>不看 token work</td>
+              </tr>
+              <tr>
+                <td>S2 LeastWork</td>
+                <td>最少 running＋queued tokens</td>
+                <td>43.67%</td>
+                <td>负载感知</td>
+                <td>stale-view herding</td>
+              </tr>
+              <tr>
+                <td>S3 GBPrefixBucket</td>
+                <td>prefix owner＋bounded fallback</td>
+                <td class="best">54.01%</td>
+                <td>delayed view 下 locality</td>
+                <td>load max／mean=1.822</td>
+              </tr>
+              <tr>
+                <td>S4 SessionAffinity</td>
+                <td>online family＋sticky owner</td>
+                <td>53.34%</td>
+                <td>hit／balance Pareto</td>
+                <td>session 是 proxy</td>
+              </tr>
+              <tr>
+                <td>S5 FlexLB TTFT</td>
+                <td>queue＋input−0.7×hit</td>
+                <td>52.32%</td>
+                <td>0ms 时 hit 53.01%＋queue 1220</td>
+                <td>50ms 后 queue 5.4×</td>
+              </tr>
+              <tr>
+                <td>S6 CalibratedTTFT</td>
+                <td>(load＋uncached)×coefficient</td>
+                <td>53.37%</td>
+                <td>便于硬件标定</td>
+                <td>未解决 view freshness</td>
+              </tr>
+            </tbody>
+          </table>
+          <pre>
+# selectors.py:218-238
 hit = cache_hits.get(node.node_id, (0, 0))[1]
 score = load(node) + request.input_tokens - cache_discount * hit
-# 不是最大化 hit；它在比较 queue work 与 saved prefill work。</pre>
-<div class="figure"><svg viewBox="0 0 900 275" width="100%"><g font-family="-apple-system,PingFang SC" font-size="12"><text x="20" y="25" font-weight="700">Token-weighted hit rate</text><g transform="translate(120 45)"><text x="-100" y="14">Random</text><rect width="443" height="20" rx="4" fill="#eef0fe"/><text x="452" y="15">44.30%</text></g><g transform="translate(120 82)"><text x="-100" y="14">LeastWork</text><rect width="437" height="20" rx="4" fill="#eef0fe"/><text x="446" y="15">43.67%</text></g><g transform="translate(120 119)"><text x="-100" y="14">S3 Prefix</text><rect width="540" height="20" rx="4" fill="#15803d"/><text x="549" y="15">54.01%</text></g><g transform="translate(120 156)"><text x="-100" y="14">S4 Session</text><rect width="533" height="20" rx="4" fill="#4338ca"/><text x="542" y="15">53.34%</text></g><g transform="translate(120 193)"><text x="-100" y="14">S5 FlexLB</text><rect width="523" height="20" rx="4" fill="#b45309"/><text x="532" y="15">52.32%</text></g><line x1="691" y1="40" x2="691" y2="230" stroke="#b91c1c" stroke-dasharray="5 3"/><text x="700" y="226" fill="#b91c1c">57.07% local token ceiling</text></g></svg><div class="caption">这张图回答：selector 已经吃掉多少 exact-prefix 空间？S3 距本地严格 ceiling 只剩约 3.06 pp。</div></div>
+# 不是最大化 hit；它在比较 queue work 与 saved prefill work。</pre
+          >
+          <h3>2.1.1 实验契约：数字在哪个世界成立</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>设置</th>
+                <th>M4 headline</th>
+                <th>影响</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Cluster</td>
+                <td>4 nodes；总容量 50,000 blocks</td>
+                <td>每台 local cache 独立，分散会制造副本</td>
+              </tr>
+              <tr>
+                <td>Eviction</td>
+                <td>E1 LRU</td>
+                <td>hit 刷新 recency</td>
+              </tr>
+              <tr>
+                <td>Visibility</td>
+                <td>prefill 完成后写 cache</td>
+                <td>并发重复计算不假装成 hit</td>
+              </tr>
+              <tr>
+                <td>View</td>
+                <td><strong>100ms delayed snapshot</strong></td>
+                <td>load、cache estimate、last-selected 都会 stale</td>
+              </tr>
+              <tr>
+                <td>Metric</td>
+                <td>normalized queue work</td>
+                <td>只做相对排序，不是真实毫秒</td>
+              </tr>
+            </tbody>
+          </table>
+          <h3>2.1.2 S3 GBPrefixBucket：对应哪段代码</h3>
+          <div class="call good">
+            <div class="label">精确映射</div>
+            S3 就是 <code>selectors.py:182-194</code> 的
+            <code>gb_prefix_bucket_selector()</code
+            >：<code>PrefixAnchor(k=2)</code>＋<code>CapacityGate(1.25)</code>＋最多两个
+            secondary nodes 的 <code>BoundedFallback</code>。
+          </div>
+          <div class="figure">
+            <svg
+              viewBox="0 0 950 220"
+              width="100%"
+              role="img"
+              aria-label="S3 决策流程"
+            >
+              <defs>
+                <marker
+                  id="s3a"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto"
+                >
+                  <path d="M0 0L10 5L0 10z" fill="#64748b" />
+                </marker>
+              </defs>
+              <g font-family="-apple-system,PingFang SC">
+                <rect
+                  x="15"
+                  y="70"
+                  width="150"
+                  height="58"
+                  rx="7"
+                  fill="#eef0fe"
+                  stroke="#4338ca"
+                />
+                <text x="90" y="94" text-anchor="middle" font-weight="700">
+                  第 k 个 prefix
+                </text>
+                <text x="90" y="114" text-anchor="middle" font-size="11">
+                  M4：k=2
+                </text>
+                <rect
+                  x="215"
+                  y="70"
+                  width="150"
+                  height="58"
+                  rx="7"
+                  fill="#eef0fe"
+                  stroke="#4338ca"
+                />
+                <text x="290" y="94" text-anchor="middle" font-weight="700">
+                  SHA256 % N
+                </text>
+                <text x="290" y="114" text-anchor="middle" font-size="11">
+                  stable owner
+                </text>
+                <polygon
+                  points="475,48 570,99 475,150 380,99"
+                  fill="#fdf3e3"
+                  stroke="#b45309"
+                />
+                <text x="475" y="94" text-anchor="middle" font-weight="700">
+                  owner 过载？
+                </text>
+                <text x="475" y="114" text-anchor="middle" font-size="11">
+                  load &gt; 1.25×mean
+                </text>
+                <rect
+                  x="635"
+                  y="25"
+                  width="145"
+                  height="58"
+                  rx="7"
+                  fill="#e9f6ec"
+                  stroke="#15803d"
+                />
+                <text x="707" y="59" text-anchor="middle" font-weight="700">
+                  选择 owner
+                </text>
+                <rect
+                  x="635"
+                  y="145"
+                  width="220"
+                  height="58"
+                  rx="7"
+                  fill="#f2f4f9"
+                  stroke="#8a93a3"
+                />
+                <text x="745" y="169" text-anchor="middle" font-weight="700">
+                  相邻 2 nodes
+                </text>
+                <text x="745" y="189" text-anchor="middle" font-size="11">
+                  否则 cluster least-work
+                </text>
+                <path
+                  d="M165 99L215 99M365 99L380 99M570 82L635 54M570 116L635 174"
+                  stroke="#64748b"
+                  fill="none"
+                  marker-end="url(#s3a)"
+                />
+              </g>
+            </svg>
+            <div class="caption">
+              相同 prefix 回到 stable owner，replica factor 降到 1.045；热 owner
+              也导致 load max／mean=1.822。
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>为什么 headline hit 高</th>
+                <th>为什么不是无条件 winner</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  稳定 owner 不依赖 stale load 排名；副本更少；100ms view 下
+                  hit=54.01%
+                </td>
+                <td>
+                  热点集中；k=2 是 trace-specific；fresh view 下
+                  S3=49.90%＜S5=53.01%；M12 同名 S3 改用第 1 块
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <h3>2.1.3 S4 SessionAffinity：没有 session_id 怎么做</h3>
+          <p>
+            S4 使用 <code>OnlineConversationLinker</code>，不是读取真实
+            session。它只看过去请求：最长共享 prefix 匹配 family；排除公共
+            hot-only blocks；family 到 cap 后切开；再 sticky 到 owner。M4 得到
+            53.34% hit、load max／mean 1.047、queue p95 3011：用 0.67pp hit 换掉
+            S3 的严重偏斜。
+          </p>
+          <ol>
+            <li>
+              要求至少共享配置给定的 minimum prefix
+              blocks，避免只凭一个公共块合并。
+            </li>
+            <li>
+              每 256 个请求按 P99 刷新 hot threshold，hot-only prefix
+              不作为会话证据。
+            </li>
+            <li>
+              M4 family cap=128；达到上限后切新 family，避免单个热家族霸占
+              node。
+            </li>
+            <li>
+              线上应把 proxy 换成 privacy-safe hashed session
+              key；当前结果不能叫真实 session 收益。
+            </li>
+          </ol>
+          <h3>2.1.4 S5 FlexLB TTFT：为什么中心化策略看起来较差</h3>
+          <pre>
+load = running_tokens + queued_uncached_tokens
+score = load + input_tokens - 0.7 × estimated_local_hit_tokens</pre
+          >
+          <p>
+            主因不是公式，而是 stale-view herding。S5 在 fresh view
+            下同时拿到更高 hit 和更低 queue；50ms 后 queue 已放大 5.4 倍。
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>View delay</th>
+                <th>Token hit</th>
+                <th>Load max／mean</th>
+                <th>Queue p95（normalized token-work）</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="best">
+                <td>0ms</td>
+                <td>53.01%</td>
+                <td>1.272</td>
+                <td>1220</td>
+              </tr>
+              <tr>
+                <td>50ms</td>
+                <td>52.32%</td>
+                <td>1.646</td>
+                <td>6589</td>
+              </tr>
+              <tr>
+                <td>500ms</td>
+                <td>52.32%</td>
+                <td>1.646</td>
+                <td>6589</td>
+              </tr>
+              <tr>
+                <td>5000ms</td>
+                <td>51.33%</td>
+                <td>1.558</td>
+                <td>9123</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="figure">
+            <svg
+              viewBox="0 0 900 285"
+              width="100%"
+              role="img"
+              aria-label="S5 delay 与 queue"
+            >
+              <g font-family="-apple-system,PingFang SC" font-size="11">
+                <text x="20" y="22" font-weight="700">
+                  S5 queue p95 随 view delay 恶化
+                </text>
+                <line x1="85" y1="235" x2="855" y2="235" stroke="#8a93a3" />
+                <line x1="85" y1="45" x2="85" y2="235" stroke="#8a93a3" />
+                <polyline
+                  points="105,212 300,108 525,108 825,62"
+                  fill="none"
+                  stroke="#b45309"
+                  stroke-width="4"
+                />
+                <g fill="#b45309">
+                  <circle cx="105" cy="212" r="6" />
+                  <circle cx="300" cy="108" r="6" />
+                  <circle cx="525" cy="108" r="6" />
+                  <circle cx="825" cy="62" r="6" />
+                </g>
+                <text x="93" y="258">0ms</text>
+                <text x="285" y="258">50ms</text>
+                <text x="505" y="258">500ms</text>
+                <text x="800" y="258">5000ms</text>
+                <text x="113" y="205">1220</text>
+                <text x="308" y="101">6589</text>
+                <text x="533" y="101">6589</text>
+                <text x="775" y="54">9123</text>
+              </g>
+            </svg>
+            <div class="caption">
+              生产 FlexLB 是否同样存在该问题仍是假说；要核对真实 view
+              refresh、RPC delay 与 node queue oscillation。
+            </div>
+          </div>
+          <h3>2.1.5 S6 CalibratedTTFT：校准 score，没有校准 freshness</h3>
+          <pre>
+uncached = input_tokens - hit_tokens
+score_ms = (queue_tokens + uncached) × prefill_uncached_token_ms</pre
+          >
+          <p>
+            S6 把 S5 的经验折扣 <code>0.7×hit</code> 换成带物理意义的
+            <code>prefill_uncached_token_ms</code>；M9-HW 得到真实 coefficient
+            后可以直接替换。 M4 hit=53.37%、load max／mean=1.269，但 queue p95
+            仍为 6393。 它改善了 score 的可标定性，没有修复输入 freshness。
+          </p>
+          <h3>2.1.6 M4 与 M12：同名策略不可直接横比</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>维度</th>
+                <th>M4</th>
+                <th>M12 placement</th>
+                <th>限制</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Workload</td>
+                <td>Mooncake trace</td>
+                <td>同一 trace＋合成 cost regimes</td>
+                <td>identity 相同；后续 contract 不同</td>
+              </tr>
+              <tr>
+                <td>View</td>
+                <td>100ms delayed</td>
+                <td>causal exact</td>
+                <td>M12 移除 S5 的主要弱点</td>
+              </tr>
+              <tr>
+                <td>S3 anchor</td>
+                <td>第 2 块</td>
+                <td>第 1 块</td>
+                <td>同名不同变体</td>
+              </tr>
+              <tr>
+                <td>S4 family</td>
+                <td>dynamic hot P99；cap=128</td>
+                <td>cohort namespace；cap=64</td>
+                <td>family 语义不同</td>
+              </tr>
+              <tr>
+                <td>Capacity</td>
+                <td>50k＋LRU pressure</td>
+                <td>无同等 eviction pressure</td>
+                <td>绝对 hit 不可比较</td>
+              </tr>
+              <tr>
+                <td>KVS</td>
+                <td>无 remote</td>
+                <td>三种 KVS regimes</td>
+                <td>部分 baseline 未完整定价 transfer</td>
+              </tr>
+            </tbody>
+          </table>
+          <h3>2.1.7 KVS／SLO-aware：从找 hit 升级为统一成本账</h3>
+          <pre>
+cost(node) = queue_cost
+           + uncached_tokens × prefill_price
+           + remote_tokens × KVS_price × contention
+           + owner_break + fairness + SLO_risk</pre
+          >
+          <p>
+            先用 model／adapter／work-shape 与 SLO gate 排除不可行 nodes，再比较
+            local reuse、remote fetch、recompute。Hybrid 用 Mooncake 风格
+            threshold 判断搬 KV 是否显著优于本地重算；PricedSpill 直接比较统一
+            ledger。
+          </p>
+          <div class="call warn">
+            <div class="label">当前 verdict</div>
+            PricedSpill 旧 grid 是 13 个 KILL_ENFORCEMENT＋2 个 provisional
+            duplicate pass，只保留 shadow／ablation。KVS contention 修复后的 M12
+            final grid 尚未完成；框架值得继续，当前价格函数未过 enforcement
+            gate。
+          </div>
+          <div class="figure">
+            <svg
+              viewBox="0 0 900 275"
+              width="100%"
+              role="img"
+              aria-label="M4 各 selector 的 token-weighted hit rate 与无限单池 ceiling 参照"
+            >
+              <g font-family="-apple-system,PingFang SC" font-size="12">
+                <text x="20" y="25" font-weight="700">
+                  Token-weighted hit rate
+                </text>
+                <g transform="translate(120 45)">
+                  <text x="-100" y="14">Random</text>
+                  <rect width="443" height="20" rx="4" fill="#eef0fe" />
+                  <text x="452" y="15">44.30%</text>
+                </g>
+                <g transform="translate(120 82)">
+                  <text x="-100" y="14">LeastWork</text>
+                  <rect width="437" height="20" rx="4" fill="#eef0fe" />
+                  <text x="446" y="15">43.67%</text>
+                </g>
+                <g transform="translate(120 119)">
+                  <text x="-100" y="14">S3 Prefix</text>
+                  <rect width="540" height="20" rx="4" fill="#15803d" />
+                  <text x="549" y="15">54.01%</text>
+                </g>
+                <g transform="translate(120 156)">
+                  <text x="-100" y="14">S4 Session</text>
+                  <rect width="533" height="20" rx="4" fill="#4338ca" />
+                  <text x="542" y="15">53.34%</text>
+                </g>
+                <g transform="translate(120 193)">
+                  <text x="-100" y="14">S5 FlexLB</text>
+                  <rect width="523" height="20" rx="4" fill="#b45309" />
+                  <text x="532" y="15">52.32%</text>
+                </g>
+                <line
+                  x1="691"
+                  y1="40"
+                  x2="691"
+                  y2="230"
+                  stroke="#b91c1c"
+                  stroke-dasharray="5 3"
+                />
+                <text x="700" y="226" fill="#b91c1c">
+                  57.07% infinite single-global ceiling
+                </text>
+              </g>
+            </svg>
+            <div class="caption">
+              这张图只把 S3 与 infinite single-global ceiling 作跨 contract
+              空间参照；3.06 pp 不是 local selector 的可实现 headroom。
+            </div>
+          </div>
 
-<h3>2.2 Eviction：LRU 是 benchmark 主线</h3><table><thead><tr><th>策略</th><th>机制</th><th>Mooncake 同构性</th><th>收益点</th><th>瓶颈</th></tr></thead><tbody><tr><td>E0 FIFO</td><td>hit 不刷新</td><td>仅 baseline</td><td>简单</td><td>丢 temporal locality</td></tr><tr class="best"><td>E1 LRU</td><td>hit move-to-end</td><td>论文 Table 1 最优</td><td>最符合该 trace</td><td>不识别 one-hit value</td></tr><tr><td>E2 SLRU</td><td>probation／protected</td><td>论文未报告</td><td>隔离一次性 block</td><td>80% protected 是假设</td></tr><tr><td>E3 Second-hit</td><td>第一次进 ghost</td><td>论文未报告</td><td>抑制 pollution</td><td>可能错拒即将复用的 prefix</td></tr><tr><td>E4 Chain-aware</td><td>保护连续 prefix value</td><td>研究扩展</td><td>减少 stranded suffix</td><td>尚未硬件验证</td></tr></tbody></table>
+          <h3>2.2 Eviction：LRU 是 benchmark 主线</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>策略</th>
+                <th>机制</th>
+                <th>Mooncake 同构性</th>
+                <th>收益点</th>
+                <th>瓶颈</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>E0 FIFO</td>
+                <td>hit 不刷新</td>
+                <td>仅 baseline</td>
+                <td>简单</td>
+                <td>丢 temporal locality</td>
+              </tr>
+              <tr class="best">
+                <td>E1 LRU</td>
+                <td>hit move-to-end</td>
+                <td>论文 Table 1 最优</td>
+                <td>最符合该 trace</td>
+                <td>不识别 one-hit value</td>
+              </tr>
+              <tr>
+                <td>E2 SLRU</td>
+                <td>probation／protected</td>
+                <td>论文未报告</td>
+                <td>隔离一次性 block</td>
+                <td>80% protected 是假设</td>
+              </tr>
+              <tr>
+                <td>E3 Second-hit</td>
+                <td>第一次进 ghost</td>
+                <td>论文未报告</td>
+                <td>抑制 pollution</td>
+                <td>可能错拒即将复用的 prefix</td>
+              </tr>
+              <tr>
+                <td>E4 Chain-aware</td>
+                <td>保护连续 prefix value</td>
+                <td>研究扩展</td>
+                <td>减少 stranded suffix</td>
+                <td>尚未硬件验证</td>
+              </tr>
+            </tbody>
+          </table>
 
-<h3>2.3 KVS：价值是“取还是算”</h3><pre># kvs.py:88-100
+          <h3>2.3 KVS：价值是“取还是算”</h3>
+          <pre>
+# kvs.py:88-100
 transfer = fixed_latency + tokens * bytes_per_token * 8 / bandwidth
 non_overlapped = transfer * (1 - overlap_ratio)
-effective = max(non_overlapped, recompute_work)</pre><table><thead><tr><th>Topology</th><th>来源顺序</th><th>最大收益点</th><th>瓶颈</th></tr></thead><tbody><tr><td>LOCAL_ONLY</td><td>local HBM→recompute</td><td>无网络</td><td>跨节点 location miss</td></tr><tr><td>SHARED_KVS</td><td>HBM→remote→recompute</td><td>location miss 变 transfer</td><td>参数仍是 synthetic</td></tr><tr><td>HYBRID</td><td>HBM→local DRAM→remote→recompute</td><td>最接近 Mooncake tier intent</td><td>无 layer overlap／SSD queue</td></tr></tbody></table><div class="call warn"><div class="label">口径</div>M5 的约 4.7% 是 modeled effective-prefix／cost 改善，不是 4.7 pp cache hit，也不是 4.7% 真实加速。</div>
+effective = max(non_overlapped, recompute_work)</pre
+          >
+          <table>
+            <thead>
+              <tr>
+                <th>Topology</th>
+                <th>来源顺序</th>
+                <th>最大收益点</th>
+                <th>瓶颈</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>LOCAL_ONLY</td>
+                <td>local HBM→recompute</td>
+                <td>无网络</td>
+                <td>跨节点 location miss</td>
+              </tr>
+              <tr>
+                <td>SHARED_KVS</td>
+                <td>HBM→remote→recompute</td>
+                <td>location miss 变 transfer</td>
+                <td>参数仍是 synthetic</td>
+              </tr>
+              <tr>
+                <td>HYBRID</td>
+                <td>HBM→local DRAM→remote→recompute</td>
+                <td>最接近 Mooncake tier intent</td>
+                <td>无 layer overlap／SSD queue</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="call warn">
+            <div class="label">口径</div>
+            M5 的约 4.7% 是 modeled effective-prefix／cost 改善，不是 4.7 pp
+            cache hit，也不是 4.7% 真实加速。
+          </div>
 
-<h3>2.4 Protocol 与 Decode</h3><table><thead><tr><th>方案</th><th>结果</th><th>最大收益点</th><th>瓶颈</th></tr></thead><tbody><tr><td>P0 PD</td><td>strict goodput 0.4883</td><td>P／D 分离 baseline</td><td>无 gated admission</td></tr><tr class="best"><td>P2 GATED_PD</td><td>0.6870</td><td>避免注定失败的完整链路</td><td>依赖准确 cost model</td></tr><tr><td>D0</td><td>2+ D nodes 通常更好</td><td>无 boundary cost</td><td>单节点 HoL</td></tr><tr><td>D1 Fixed lease</td><td>1 D node 约 19.7×</td><td>重排队恢复公平</td><td>2 D nodes 反而下降</td></tr><tr><td>D1.5 Adaptive</td><td>boundary 12.92→4.95</td><td>只在压力时介入</td><td>pressure 未标定</td></tr><tr><td>D2 Cooperative</td><td>upper bound only</td><td>checkpoint 后安全让位</td><td>resume／ack／epoch 风险</td></tr></tbody></table><pre># preemption.py:193-221
+          <h3>2.4 Protocol 与 Decode</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>方案</th>
+                <th>结果</th>
+                <th>最大收益点</th>
+                <th>瓶颈</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>P0 PD</td>
+                <td>strict goodput 0.4883</td>
+                <td>P／D 分离 baseline</td>
+                <td>无 gated admission</td>
+              </tr>
+              <tr class="best">
+                <td>P2 GATED_PD</td>
+                <td>0.6870</td>
+                <td>避免注定失败的完整链路</td>
+                <td>依赖准确 cost model</td>
+              </tr>
+              <tr>
+                <td>D0</td>
+                <td>2+ D nodes 通常更好</td>
+                <td>无 boundary cost</td>
+                <td>单节点 HoL</td>
+              </tr>
+              <tr>
+                <td>D1 Fixed lease</td>
+                <td>1 D node 约 19.7×</td>
+                <td>重排队恢复公平</td>
+                <td>2 D nodes 反而下降</td>
+              </tr>
+              <tr>
+                <td>D1.5 Adaptive</td>
+                <td>boundary 12.92→4.95</td>
+                <td>只在压力时介入</td>
+                <td>pressure 未标定</td>
+              </tr>
+              <tr>
+                <td>D2 Cooperative</td>
+                <td>upper bound only</td>
+                <td>checkpoint 后安全让位</td>
+                <td>resume／ack／epoch 风险</td>
+              </tr>
+            </tbody>
+          </table>
+          <pre>
+# preemption.py:193-221
 if served_quantum &lt; min_quantum: keep
 if preemption_count &gt;= max_preemptions: keep
 if move_score - keep_score &gt; safety_margin: abort_self
-# 不是“低优先级就杀掉”；它需要 grant、checkpoint 与 output fence。</pre></section>
+# 不是“低优先级就杀掉”；它需要 grant、checkpoint 与 output fence。</pre
+          >
+        </section>
 
-<section id="eval"><h2><span class="n">3</span>关键技术评估</h2><h3>3.1 收益排行榜</h3><table><thead><tr><th>#</th><th>能力</th><th>最大观察收益</th><th>证据</th><th>判断</th></tr></thead><tbody><tr class="best"><td>1</td><td>Prefix locality restoration</td><td>+9.71 pp vs Random</td><td>真实 trace replay</td><td>最确定；S3 作 ceiling probe</td></tr><tr><td>2</td><td>Gated-PD</td><td>0.4883→0.6870</td><td>NORMALIZED_WORK</td><td>收益随风险权重可变号</td></tr><tr><td>3</td><td>Decode lease under pressure</td><td>单 D node：0.00718→0.14181</td><td>病理 HoL case</td><td>非病理配置无正收益证据</td></tr><tr><td>4</td><td>Shared KVS</td><td>约 4.7% modeled benefit</td><td>synthetic KVT</td><td>组合基础</td></tr><tr><td>5</td><td>D2 preemption</td><td>未可信量化</td><td>upper-bound</td><td>当前不可估值</td></tr></tbody></table><div class="call warn"><div class="label">Production baseline 错配警告</div><ul><li><strong>+9.71 pp 只相对 Random</strong>，禁止当作线上收益。</li><li>S5=52.32%、S6=53.37%；S3 相对 production-style simulator baseline 只有约 0.6～1.7 pp。</li><li>S4 用约 0.67 pp hit 代价，把 load max/mean 从 1.822 降到 1.047；这才是主要 trade-off。</li><li>Production headroom 仍是 NOT_MEASURED，必须由 R1 shadow 给出。</li></ul></div><div class="call warn"><div class="label">敏感性实锤</div><ul><li><code>lambda_risk=2.0</code> 时 P2=0.4437，低于 P0=0.4883。</li><li>2 个 D nodes 时 D1=0.6235，低于 D0=0.6846。</li><li><code>migrate_on_boundary=True</code> 时 D1 跌到 0.00153。</li><li>Deploy candidate 更像真实 session_id 版 S4；S3 保留为 locality ceiling probe。</li></ul></div>
-<div class="call good"><div class="label">最值钱</div><p class="value">Cache-aware request lifecycle，而不是 cache-aware selector。</p><ol><li>Prefix routing 已接近 workload ceiling；有限 local 与无限 global 的 3.06 pp 差距只作参照。</li><li>Mooncake Algorithm 1 本身也在比较 queue、prefill、transfer 与 SLO，而不是只选最长 prefix。</li><li>你的设计把 WHERE 留给现有 Global Batching／FlexLB／Turbo，把 attempt、lease、checkpoint、output authority 和 retry budget 留给 client。</li><li>Admission gating＋归属分离有 replay／protocol 证据；remote 五元比价主要是 Algorithm 1 类比＋架构推理；D2 未验证。</li><li>同一套 ledger 最终可以回答：发哪台 P、KV 从哪里来、D 是否继续占用、失败后从哪里恢复。</li></ol></div>
-<div class="call warn"><div class="label">不能相加</div>S3 locality＋KVS＋SLO gate＋decode lease 的收益不能直接相加。KVS 让 selector 不必为命中粘死热点；SLO gate 判断 transfer 是否值得；lease 只在压力下减少 HoL。它们是一个控制闭环的不同环节。</div></section>
+        <section id="eval">
+          <h2><span class="n">3</span>关键技术评估</h2>
+          <h3>3.1 收益排行榜</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>能力</th>
+                <th>最大观察收益</th>
+                <th>证据</th>
+                <th>判断</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="best">
+                <td>1</td>
+                <td>Prefix locality restoration</td>
+                <td>+9.71 pp vs Random</td>
+                <td>真实 trace replay</td>
+                <td>最确定；S3 作 ceiling probe</td>
+              </tr>
+              <tr>
+                <td>2</td>
+                <td>Gated-PD</td>
+                <td>0.4883→0.6870</td>
+                <td>NORMALIZED_WORK</td>
+                <td>收益随风险权重可变号</td>
+              </tr>
+              <tr>
+                <td>3</td>
+                <td>Decode lease under pressure</td>
+                <td>单 D node：0.00718→0.14181</td>
+                <td>病理 HoL case</td>
+                <td>非病理配置无正收益证据</td>
+              </tr>
+              <tr>
+                <td>4</td>
+                <td>Shared KVS</td>
+                <td>约 4.7% modeled benefit</td>
+                <td>synthetic KVT</td>
+                <td>组合基础</td>
+              </tr>
+              <tr>
+                <td>5</td>
+                <td>D2 preemption</td>
+                <td>未可信量化</td>
+                <td>upper-bound</td>
+                <td>当前不可估值</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="call warn">
+            <div class="label">Production baseline 错配警告</div>
+            <ul>
+              <li>
+                <strong>+9.71 pp 只相对 Random</strong>，禁止当作线上收益。
+              </li>
+              <li>
+                S5=52.32%、S6=53.37%；S3 相对 production-style simulator
+                baseline 只有约 0.6～1.7 pp。
+              </li>
+              <li>
+                S4 用约 0.67 pp hit 代价，把 load max/mean 从 1.822 降到
+                1.047；这才是主要 trade-off。
+              </li>
+              <li>
+                Production headroom 仍是 NOT_MEASURED，必须由 R1 shadow 给出。
+              </li>
+            </ul>
+          </div>
+          <div class="call warn">
+            <div class="label">敏感性实锤</div>
+            <ul>
+              <li>
+                <code>lambda_risk=2.0</code> 时 P2=0.4437，低于 P0=0.4883。
+              </li>
+              <li>2 个 D nodes 时 D1=0.6235，低于 D0=0.6846。</li>
+              <li>
+                <code>migrate_on_boundary=True</code> 时 D1 跌到 0.00153。
+              </li>
+              <li>
+                Deploy candidate 更像真实 session_id 版 S4；S3 保留为 locality
+                ceiling probe。
+              </li>
+            </ul>
+          </div>
+          <div class="call good">
+            <div class="label">最值钱</div>
+            <p class="value">
+              Cache-aware request lifecycle，而不是 cache-aware selector。
+            </p>
+            <ol>
+              <li>
+                Prefix routing 已接近 workload ceiling；有限 local 与无限 global
+                的 3.06 pp 差距只作参照。
+              </li>
+              <li>
+                Mooncake Algorithm 1 本身也在比较 queue、prefill、transfer 与
+                SLO，而不是只选最长 prefix。
+              </li>
+              <li>
+                你的设计把 WHERE 留给现有 Global Batching／FlexLB／Turbo，把
+                attempt、lease、checkpoint、output authority 和 retry budget
+                留给 client。
+              </li>
+              <li>
+                Admission gating＋归属分离有 replay／protocol 证据；remote
+                五元比价主要是 Algorithm 1 类比＋架构推理；D2 未验证。
+              </li>
+              <li>
+                同一套 ledger 最终可以回答：发哪台 P、KV 从哪里来、D
+                是否继续占用、失败后从哪里恢复。
+              </li>
+            </ol>
+          </div>
+          <div class="call warn">
+            <div class="label">不能相加</div>
+            S3 locality＋KVS＋SLO gate＋decode lease 的收益不能直接相加。KVS 让
+            selector 不必为命中粘死热点；SLO gate 判断 transfer 是否值得；lease
+            只在压力下减少 HoL。它们是一个控制闭环的不同环节。
+          </div>
+        </section>
 
-<section id="risk"><h2><span class="n">4</span>风险与 benchmark 诚实性</h2><h3>4.1 是否作弊</h3><table><thead><tr><th>假设</th><th>状态</th><th>审计结论</th></tr></thead><tbody><tr><td>512-token chained hash、连续 prefix</td><td class="best">符合</td><td>与 trace 定义一致；中间 miss 后不能跳着命中</td></tr><tr><td>LRU 主 baseline</td><td class="best">符合</td><td>论文 Table 1 在该 trace 上 LRU 最优</td></tr><tr><td>55.26% 与论文 51% 并列</td><td class="risk">口径差异</td><td>可并列但不能声称 exact reproduction</td></tr><tr><td>多节点 local capacity 横比 global capacity</td><td class="risk">不同实验</td><td><strong>直接横比就是作弊</strong>；需 single-global parity runner</td></tr><tr><td>GPU block capacity＋LRU</td><td class="risk">粗化</td><td>是 model abstraction；Mooncake prefill GPU 更像单请求 working set</td></tr><tr><td>CPU DRAM／remote holder LRU</td><td class="best">部分符合</td><td>缺 replication policy、sender congestion、swap</td></tr><tr><td>remote store 当 SSD</td><td class="risk">不符合</td><td>当前没有独立 SSD tier，禁止这样命名</td></tr><tr><td>固定 bandwidth／overlap 当真实 ms</td><td class="risk">会作弊</td><td>M9-HW 前只能标 synthetic／normalized</td></tr><tr><td>oracle cache view 当线上结果</td><td class="risk">会作弊</td><td>必须同时跑 delayed／loss view</td></tr><tr><td>推断 session 当真实 session_id</td><td class="risk">proxy</td><td>需要 production shadow 对照</td></tr><tr><td>resume 100% 成功</td><td class="risk">upper bound</td><td>不可声称 D2 收益已验证</td></tr></tbody></table>
-<h3>4.2 GPU／CPU／storage 边界</h3><table><thead><tr><th>Tier</th><th>Mooncake 语义</th><th>当前 simulator</th><th>未覆盖 benchmark</th></tr></thead><tbody><tr><td>GPU VRAM</td><td>prefill 单请求 working set；layer-wise async；decode batch capacity</td><td>local blocks＋queue</td><td>resident token-seconds、fragmentation、TBT、layer overlap</td></tr><tr><td>CPU DRAM</td><td>paged global pool；LRU/LFU/request-aware；RDMA holder</td><td>local DRAM＋remote LRU copies</td><td>NUMA、registration、sender congestion</td></tr><tr><td>SSD</td><td>cold block swap</td><td>未独立实现</td><td>IOPS、queue、promotion、write amplification</td></tr></tbody></table><div class="call"><div class="label">诚实命名</div>当前系统是 <strong>trace-faithful prefix replay＋parameterized tier model</strong>。它符合策略 benchmark 的基本纪律，但还不是 Mooncake hardware reproduction。</div></section>
+        <section id="risk">
+          <h2><span class="n">4</span>风险与 benchmark 诚实性</h2>
+          <h3>4.1 是否作弊</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>假设</th>
+                <th>状态</th>
+                <th>审计结论</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>512-token chained hash、连续 prefix</td>
+                <td class="best">符合</td>
+                <td>与 trace 定义一致；中间 miss 后不能跳着命中</td>
+              </tr>
+              <tr>
+                <td>LRU 主 baseline</td>
+                <td class="best">符合</td>
+                <td>论文 Table 1 在该 trace 上 LRU 最优</td>
+              </tr>
+              <tr>
+                <td>55.26% 与论文 51% 并列</td>
+                <td class="risk">口径差异</td>
+                <td>可并列但不能声称 exact reproduction</td>
+              </tr>
+              <tr>
+                <td>多节点 local capacity 横比 global capacity</td>
+                <td class="risk">不同实验</td>
+                <td>
+                  <strong>直接横比就是作弊</strong>；需 single-global parity
+                  runner
+                </td>
+              </tr>
+              <tr>
+                <td>GPU block capacity＋LRU</td>
+                <td class="risk">粗化</td>
+                <td>
+                  是 model abstraction；Mooncake prefill GPU 更像单请求 working
+                  set
+                </td>
+              </tr>
+              <tr>
+                <td>CPU DRAM／remote holder LRU</td>
+                <td class="best">部分符合</td>
+                <td>缺 replication policy、sender congestion、swap</td>
+              </tr>
+              <tr>
+                <td>remote store 当 SSD</td>
+                <td class="risk">不符合</td>
+                <td>当前没有独立 SSD tier，禁止这样命名</td>
+              </tr>
+              <tr>
+                <td>固定 bandwidth／overlap 当真实 ms</td>
+                <td class="risk">会作弊</td>
+                <td>M9-HW 前只能标 synthetic／normalized</td>
+              </tr>
+              <tr>
+                <td>oracle cache view 当线上结果</td>
+                <td class="risk">会作弊</td>
+                <td>必须同时跑 delayed／loss view</td>
+              </tr>
+              <tr>
+                <td>推断 session 当真实 session_id</td>
+                <td class="risk">proxy</td>
+                <td>需要 production shadow 对照</td>
+              </tr>
+              <tr>
+                <td>resume 100% 成功</td>
+                <td class="risk">upper bound</td>
+                <td>不可声称 D2 收益已验证</td>
+              </tr>
+            </tbody>
+          </table>
+          <h3>4.2 GPU／CPU／storage 边界</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Tier</th>
+                <th>Mooncake 语义</th>
+                <th>当前 simulator</th>
+                <th>未覆盖 benchmark</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>GPU VRAM</td>
+                <td>
+                  prefill 单请求 working set；layer-wise async；decode batch
+                  capacity
+                </td>
+                <td>local blocks＋queue</td>
+                <td>
+                  resident token-seconds、fragmentation、TBT、layer overlap
+                </td>
+              </tr>
+              <tr>
+                <td>CPU DRAM</td>
+                <td>paged global pool；LRU/LFU/request-aware；RDMA holder</td>
+                <td>local DRAM＋remote LRU copies</td>
+                <td>NUMA、registration、sender congestion</td>
+              </tr>
+              <tr>
+                <td>SSD</td>
+                <td>cold block swap</td>
+                <td>未独立实现</td>
+                <td>IOPS、queue、promotion、write amplification</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="call">
+            <div class="label">诚实命名</div>
+            当前系统是
+            <strong
+              >trace-faithful prefix replay＋parameterized tier model</strong
+            >。它符合策略 benchmark 的基本纪律，但还不是 Mooncake hardware
+            reproduction。
+          </div>
+        </section>
 
-<section id="rollout"><h2><span class="n">5</span>验收门</h2><p>M12 是并行研究线 C，不改变 R1／B0／M9-HW 的既有排队顺序。</p><table><thead><tr><th>优先级</th><th>Gate</th><th>状态</th><th>退出条件</th></tr></thead><tbody><tr><td>1</td><td>R1 shadow</td><td class="risk">未跑 3 天</td><td>owner signoff＋privacy-safe session key；零 enforce；生产 headroom／load skew 基线</td></tr><tr><td>2，并行</td><td>B0＋B0.5</td><td class="risk">未实现</td><td>global pool 六档 parity；TTL generator 一键出表</td></tr><tr><td>3，立即排队</td><td>M9-HW</td><td class="risk">harness only</td><td>真实 prefill／decode／KVT／overlap coefficients</td></tr><tr><td>4</td><td>M10-HW</td><td class="risk">harness only</td><td>M9 后真实压力 tau-b gate</td></tr><tr><td>线 C 并行</td><td>M12.0</td><td class="risk">KILL_ROUTER_HOLD</td><td>3.05s bucket；5s 保守上界 0.1725%＜10%</td></tr><tr><td>线 C 并行</td><td>M12.1</td><td class="best">COMPLETE</td><td>goodput／work／fairness contract＋三套 regime</td></tr><tr><td>线 C 并行</td><td>M12.2–M12.5</td><td class="risk">已设计</td><td>Priced Spill／Decode Credits／eviction 的多维 Pareto</td></tr><tr><td>defer</td><td>B1 tier fidelity</td><td class="risk">最小模型</td><td>M9 前不增加更精细的假参数</td></tr><tr><td>freeze</td><td>D2</td><td class="risk">upper-bound</td><td>Q5／Q6 与真实 resume 前不投入</td></tr></tbody></table><h3>5.1 Kill／narrow criteria</h3><ol><li>R1 若显示 production baseline headroom＜2 pp 且无 load-skew 空间，关闭 WHERE enforcement 线。</li><li>M12.0 已触发 hard kill：停止 router hold；不否定 Priced Spill／placement locality／engine batching。</li><li>M12.1 已冻结 tier≥0.80、Jain≥0.90、relative regression≤0.02。</li><li>M12.2 epsilon 冻结为 hit 0.1pp、max／mean +0.05、P queue p95 +5%。</li><li>M12.3 在 1.5× overload、causal predictor 下 strict goodput 增益低于 5%，降为 overload-only。</li><li>normalized simulation 可以 kill；pass 只算 provisional。M12-HW 前禁止发布 MFU。</li></ol></section>
+        <section id="rollout">
+          <h2><span class="n">5</span>验收门</h2>
+          <p>M12 是并行研究线 C，不改变 R1／B0／M9-HW 的既有排队顺序。</p>
+          <table>
+            <thead>
+              <tr>
+                <th>优先级</th>
+                <th>Gate</th>
+                <th>状态</th>
+                <th>退出条件</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>1</td>
+                <td>R1 shadow</td>
+                <td class="risk">未跑 3 天</td>
+                <td>
+                  owner signoff＋privacy-safe session key；零 enforce；生产
+                  headroom／load skew 基线
+                </td>
+              </tr>
+              <tr>
+                <td>2，并行</td>
+                <td>B0＋B0.5</td>
+                <td class="risk">未实现</td>
+                <td>global pool 六档 parity；TTL generator 一键出表</td>
+              </tr>
+              <tr>
+                <td>3，立即排队</td>
+                <td>M9-HW</td>
+                <td class="risk">harness only</td>
+                <td>真实 prefill／decode／KVT／overlap coefficients</td>
+              </tr>
+              <tr>
+                <td>4</td>
+                <td>M10-HW</td>
+                <td class="risk">harness only</td>
+                <td>M9 后真实压力 tau-b gate</td>
+              </tr>
+              <tr>
+                <td>线 C 并行</td>
+                <td>M12.0</td>
+                <td class="risk">KILL_ROUTER_HOLD</td>
+                <td>3.05s bucket；5s 保守上界 0.1725%＜10%</td>
+              </tr>
+              <tr>
+                <td>线 C 并行</td>
+                <td>M12.1</td>
+                <td class="best">COMPLETE</td>
+                <td>goodput／work／fairness contract＋三套 regime</td>
+              </tr>
+              <tr>
+                <td>线 C 并行</td>
+                <td>M12.2–M12.5</td>
+                <td class="risk">已设计</td>
+                <td>Priced Spill／Decode Credits／eviction 的多维 Pareto</td>
+              </tr>
+              <tr>
+                <td>defer</td>
+                <td>B1 tier fidelity</td>
+                <td class="risk">最小模型</td>
+                <td>M9 前不增加更精细的假参数</td>
+              </tr>
+              <tr>
+                <td>freeze</td>
+                <td>D2</td>
+                <td class="risk">upper-bound</td>
+                <td>Q5／Q6 与真实 resume 前不投入</td>
+              </tr>
+            </tbody>
+          </table>
+          <h3>5.1 Kill／narrow criteria</h3>
+          <ol>
+            <li>
+              R1 若显示 production baseline headroom＜2 pp 且无 load-skew
+              空间，关闭 WHERE enforcement 线。
+            </li>
+            <li>
+              M12.0 已触发 hard kill：停止 router hold；不否定 Priced
+              Spill／placement locality／engine batching。
+            </li>
+            <li>
+              M12.1 已冻结 tier≥0.80、Jain≥0.90、relative regression≤0.02。
+            </li>
+            <li>
+              M12.2 epsilon 冻结为 hit 0.1pp、max／mean +0.05、P queue p95 +5%。
+            </li>
+            <li>
+              M12.3 的预注册条件：若在 1.5× overload、causal predictor 下 strict
+              goodput 增益低于 5%，则降为 overload-only；当前 final grid
+              未完成。
+            </li>
+            <li>
+              normalized simulation 可以 kill；pass 只算 provisional。M12-HW
+              前禁止发布 MFU。
+            </li>
+          </ol>
+        </section>
 
-<section id="ref"><h2><span class="n">6</span>引用</h2><table><thead><tr><th>证据</th><th>位置</th></tr></thead><tbody><tr><td>Mooncake 架构／trace／Table 1／Algorithm 1</td><td><a href="https://arxiv.org/html/2407.00079v4">论文 HTML</a></td></tr><tr><td>Selector</td><td><code>src/prefill_cache_sim/selectors.py:31-268</code></td></tr><tr><td>Continuous-prefix cache</td><td><code>src/prefill_cache_sim/cache.py:45-160</code></td></tr><tr><td>Eviction</td><td><code>src/prefill_cache_sim/eviction.py:11-128</code></td></tr><tr><td>Tiered KVS</td><td><code>src/prefill_cache_sim/kvs.py:43-330</code></td></tr><tr><td>Decode lease／preemption</td><td><code>decode_lease.py:174-236</code>／<code>preemption.py:95-229</code></td></tr><tr><td>实验 artifacts</td><td><code>results/m4/summary.json</code>～<code>results/m10-synthetic/</code></td></tr><tr><td>完整文字版</td><td><code>docs/strategy-value-audit.md</code></td></tr></tbody></table></section>
-</main></div><script>const ss=[...document.querySelectorAll('main section')],ls=[...document.querySelectorAll('nav a')];const o=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting)ls.forEach(l=>l.classList.toggle('active',l.getAttribute('href')==='#'+e.target.id))}),{rootMargin:'-35% 0px -55%'});ss.forEach(s=>o.observe(s));</script></body></html>
+        <section id="ref">
+          <h2><span class="n">6</span>引用</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>证据</th>
+                <th>位置</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Mooncake 架构／trace／Table 1／Algorithm 1</td>
+                <td>
+                  <a href="https://arxiv.org/html/2407.00079v4">论文 HTML</a>
+                </td>
+              </tr>
+              <tr>
+                <td>Selector</td>
+                <td><code>src/prefill_cache_sim/selectors.py:31-268</code></td>
+              </tr>
+              <tr>
+                <td>Continuous-prefix cache</td>
+                <td><code>src/prefill_cache_sim/cache.py:45-160</code></td>
+              </tr>
+              <tr>
+                <td>Eviction</td>
+                <td><code>src/prefill_cache_sim/eviction.py:11-128</code></td>
+              </tr>
+              <tr>
+                <td>Tiered KVS</td>
+                <td><code>src/prefill_cache_sim/kvs.py:43-330</code></td>
+              </tr>
+              <tr>
+                <td>Decode lease／preemption</td>
+                <td>
+                  <code>decode_lease.py:174-236</code>／<code
+                    >preemption.py:95-229</code
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td>实验 artifacts</td>
+                <td>
+                  <code>results/m4/summary.json</code>～<code
+                    >results/m10-synthetic/</code
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td>完整文字版</td>
+                <td><code>docs/strategy-value-audit.md</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      </main>
+    </div>
+    <script>
+      const ss = [...document.querySelectorAll("main section")],
+        ls = [...document.querySelectorAll("nav a")];
+      const o = new IntersectionObserver(
+        (es) =>
+          es.forEach((e) => {
+            if (e.isIntersecting)
+              ls.forEach((l) =>
+                l.classList.toggle(
+                  "active",
+                  l.getAttribute("href") === "#" + e.target.id,
+                ),
+              );
+          }),
+        { rootMargin: "-35% 0px -55%" },
+      );
+      ss.forEach((s) => o.observe(s));
+    </script>
+  </body>
+</html>
