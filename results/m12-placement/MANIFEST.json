@@ -1,0 +1,11 @@
+{
+  "algorithm": "sha256",
+  "files": {
+    "comparisons/g12-verdicts.csv": "8537cf202d4a3d3ae17c5560585b2b134e04fa3d5fec675a0283fadc0f085b8a",
+    "config.json": "a4a819fe58c1db1aa7a93f744d8ceb45d44892e55846fefbe482a0fa34e6d502",
+    "contract.json": "ec262a981f36e48ba3d26d42e733d2dafe83c3fbbcd14b46ef52dd96abf0604a",
+    "failures.csv": "0449c9f9a5828a64d9bd680edcfc0cb36014dab3e88a4b6c303a64eb699c3297",
+    "results.csv": "9c7b897b2e5e758e1497a95d1ab8f12e55b91fa82863375fd424b7e90dba6d10"
+  },
+  "schema_version": "m12-placement-manifest-v1"
+}
