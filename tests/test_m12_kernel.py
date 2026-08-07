@@ -9,6 +9,7 @@ from prefill_cache_sim.m12_kernel import (
     AttemptTerminal,
     CacheMutation,
     CausalKernel,
+    CausalView,
     FrozenKernelCostModel,
     KernelConfig,
     KernelPolicy,
@@ -137,7 +138,7 @@ def test_cache_snapshot_store_reuses_work_until_mutation() -> None:
     assert first_mapping is second_mapping
     assert first_union is second_union
     assert snapshots.snapshot_entry_copies == 2
-    assert snapshots.union_entry_visits == 2
+    assert snapshots.union_entry_visits == 0
 
     cache["p0"].add("C")
     snapshots.invalidate("p0")
@@ -145,9 +146,9 @@ def test_cache_snapshot_store_reuses_work_until_mutation() -> None:
     assert third_mapping is not first_mapping
     assert third_mapping["p0"] == frozenset({"A", "C"})
     assert first_mapping["p0"] == frozenset({"A"})
-    assert third_union == frozenset({"A", "B", "C"})
+    assert set(third_union) == {"A", "B", "C"}
     assert snapshots.snapshot_entry_copies == 4
-    assert snapshots.union_entry_visits == 5
+    assert snapshots.union_entry_visits == 3
 
 
 def test_cache_snapshot_store_preserves_kernel_node_order() -> None:
@@ -178,7 +179,39 @@ def test_cache_snapshot_work_scales_with_mutations_not_view_reads() -> None:
         snapshots.view()
 
     assert snapshots.snapshot_entry_copies == 2 * sum(range(1, 33))
-    assert snapshots.union_entry_visits == sum(range(65))
+    assert snapshots.union_entry_visits == 0
+
+
+def test_cache_snapshot_completed_keys_are_lazy_until_iterated() -> None:
+    cache = {"p0": {f"A{index}" for index in range(1000)}, "p1": {"B"}}
+    snapshots = _CacheSnapshotStore(cache)
+
+    _, completed = snapshots.view()
+    assert "A999" in completed
+    assert "missing" not in completed
+    assert snapshots.union_entry_visits == 0
+
+    assert len(completed) == 1001
+    assert snapshots.union_entry_visits == 1001
+
+
+def test_cache_snapshot_completed_keys_preserve_set_algebra() -> None:
+    snapshots = _CacheSnapshotStore({"p0": {"A"}, "p1": {"B"}})
+    _, completed = snapshots.view()
+
+    assert completed | {"C"} == frozenset({"A", "B", "C"})
+    assert completed & {"B", "C"} == frozenset({"B"})
+    assert completed - {"A"} == frozenset({"B"})
+    assert completed ^ {"B", "C"} == frozenset({"A", "C"})
+
+
+def test_public_causal_view_freezes_completed_cache_keys() -> None:
+    mutable = {"A"}
+    view = CausalView(0, mutable, {}, {}, {}, {})
+
+    mutable.add("B")
+    assert view.completed_cache_keys == frozenset({"A"})
+    assert isinstance(view.completed_cache_keys, frozenset)
 
 
 def test_completion_callbacks_share_one_immutable_pre_mutation_view() -> None:

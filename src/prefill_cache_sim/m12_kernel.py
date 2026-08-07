@@ -9,11 +9,12 @@ from __future__ import annotations
 import heapq
 import math
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from types import MappingProxyType
+from typing import TypeVar
 
 from .m12_metrics import (
     AttemptOutcome,
@@ -21,6 +22,8 @@ from .m12_metrics import (
     M12MetricReport,
     aggregate_m12_metrics,
 )
+
+_T = TypeVar("_T")
 
 
 def _remaining_queue_work(
@@ -158,7 +161,7 @@ class AttemptExecutionSpec:
 @dataclass(frozen=True, slots=True)
 class CausalView:
     now_work: float
-    completed_cache_keys: frozenset[str]
+    completed_cache_keys: AbstractSet[str]
     prefill_available_at: Mapping[str, float]
     decode_available_at: Mapping[str, float]
     cache_by_node: Mapping[str, frozenset[str]]
@@ -168,6 +171,9 @@ class CausalView:
     retry_budget_remaining: int = 0
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "completed_cache_keys", frozenset(self.completed_cache_keys)
+        )
         object.__setattr__(
             self,
             "prefill_available_at",
@@ -191,7 +197,7 @@ class CausalView:
     def _from_kernel(
         cls,
         now_work: float,
-        completed_cache_keys: frozenset[str],
+        completed_cache_keys: AbstractSet[str],
         prefill_available_at: Mapping[str, float],
         decode_available_at: Mapping[str, float],
         cache_by_node: Mapping[str, frozenset[str]],
@@ -207,6 +213,42 @@ class CausalView:
         object.__setattr__(view, "queued_prefill_work", queued_prefill_work)
         object.__setattr__(view, "retry_budget_remaining", 0)
         return view
+
+
+class _CompletedCacheKeysView(AbstractSet[str]):
+    """Immutable lazy union over one frozen per-node cache snapshot."""
+
+    __slots__ = ("_mapping", "_record_visits")
+
+    def __init__(
+        self,
+        mapping: Mapping[str, frozenset[str]],
+        record_visits: Callable[[int], None],
+    ) -> None:
+        self._mapping = mapping
+        self._record_visits = record_visits
+
+    def __contains__(self, key: object) -> bool:
+        return any(key in values for values in self._mapping.values())
+
+    def __iter__(self) -> Iterator[str]:
+        seen: set[str] = set()
+        visits = 0
+        for values in self._mapping.values():
+            for key in values:
+                visits += 1
+                if key in seen:
+                    continue
+                seen.add(key)
+                yield key
+        self._record_visits(visits)
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self)
+
+    @classmethod
+    def _from_iterable(cls, values: Iterable[_T]) -> AbstractSet[_T]:
+        return frozenset(values)
 
 
 class _CacheSnapshotStore:
@@ -226,7 +268,7 @@ class _CacheSnapshotStore:
         self._cache = cache
         self._node_order = tuple(cache)
         self._mapping: Mapping[str, frozenset[str]] | None = None
-        self._completed: frozenset[str] | None = None
+        self._completed: AbstractSet[str] | None = None
         self._dirty_nodes = set(cache)
         self.snapshot_entry_copies = 0
         self.union_entry_visits = 0
@@ -235,7 +277,10 @@ class _CacheSnapshotStore:
         self._dirty_nodes.add(node)
         self._completed = None
 
-    def view(self) -> tuple[Mapping[str, frozenset[str]], frozenset[str]]:
+    def _record_union_visits(self, visits: int) -> None:
+        self.union_entry_visits += visits
+
+    def view(self) -> tuple[Mapping[str, frozenset[str]], AbstractSet[str]]:
         if self._mapping is None or self._dirty_nodes:
             frozen = dict(self._mapping or {})
             for node in self._node_order:
@@ -247,10 +292,9 @@ class _CacheSnapshotStore:
             self._mapping = MappingProxyType(frozen)
             self._dirty_nodes.clear()
         if self._completed is None:
-            self.union_entry_visits += sum(
-                len(values) for values in self._mapping.values()
+            self._completed = _CompletedCacheKeysView(
+                self._mapping, self._record_union_visits
             )
-            self._completed = frozenset().union(*self._mapping.values())
         return self._mapping, self._completed
 
 
@@ -837,7 +881,7 @@ class CausalKernel:
             executed,
             metrics,
             tuple(event_log),
-            cache_snapshots.view()[1],
+            frozenset(cache_snapshots.view()[1]),
         )
 
     def _materialize(self, item: _Pending) -> ExecutedAttempt:
