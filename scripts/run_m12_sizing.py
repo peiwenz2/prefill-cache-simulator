@@ -163,7 +163,7 @@ def build_artifacts(
         "tier_slo_work": TIER_SLO_WORK,
         "baseline_gates": asdict(BASELINE_GATES),
         "strict_95_gates": asdict(STRICT_95_GATES),
-        "ideal_global_kvs_deployable": False,
+        "zero_transfer_price_control_deployable": False,
     }
     summary = {
         "baseline": baseline_verdicts,

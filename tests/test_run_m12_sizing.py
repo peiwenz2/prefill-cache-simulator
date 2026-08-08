@@ -66,7 +66,7 @@ def test_artifacts_are_deterministic_manifested_and_exclude_ideal_winner(
     tmp_path, monkeypatch
 ) -> None:
     records = (
-        record(SizingTopology.IDEAL_GLOBAL_KVS, 1, completion=1),
+        record(SizingTopology.ZERO_TRANSFER_PRICE_CONTROL, 1, completion=1),
         record(SizingTopology.LOCAL_ONLY, 1, completion=0.9),
         record(SizingTopology.LOCAL_ONLY, 2, completion=1),
         record(SizingTopology.SHARED_KVS, 1, completion=0.9),
@@ -109,11 +109,13 @@ def test_artifacts_are_deterministic_manifested_and_exclude_ideal_winner(
         "selected_topology": SizingTopology.LOCAL_ONLY.value,
     }
     assert (
-        verdict["baseline"][SizingTopology.IDEAL_GLOBAL_KVS.value]["deployable"]
+        verdict["baseline"][SizingTopology.ZERO_TRANSFER_PRICE_CONTROL.value][
+            "deployable"
+        ]
         is False
     )
     assert (
-        verdict["baseline"][SizingTopology.IDEAL_GLOBAL_KVS.value][
+        verdict["baseline"][SizingTopology.ZERO_TRANSFER_PRICE_CONTROL.value][
             "minimum_feasible_p"
         ]
         == 1

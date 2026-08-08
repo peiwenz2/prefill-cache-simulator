@@ -175,12 +175,12 @@ def test_global_verdict_fails_closed_when_a_deployable_topology_is_missing() -> 
     assert result.grid_exhausted is True
 
 
-def test_ideal_control_is_never_selected_as_deployable_minimum() -> None:
+def test_zero_transfer_control_is_never_selected_as_deployable_minimum() -> None:
     cells = (
         evaluate_gates(
             observation(), gates(),
             p_count=1,
-            topology=SizingTopology.IDEAL_GLOBAL_KVS,
+            topology=SizingTopology.ZERO_TRANSFER_PRICE_CONTROL,
         ),
         evaluate_gates(
             observation(completion_ratio=0.9), gates(),
@@ -224,7 +224,7 @@ def _trace_row(
     )
 
 
-def test_ideal_global_kvs_allows_remote_hit_without_transfer_work() -> None:
+def test_zero_transfer_control_allows_remote_hit_without_transfer_work() -> None:
     workload = build_kernel_requests(
         [
             _trace_row("seed", 0, ("A",), (10,)),
@@ -244,7 +244,7 @@ def test_ideal_global_kvs_allows_remote_hit_without_transfer_work() -> None:
         "kvs_bytes_per_token": 16,
     }
     ideal = run_sizing_cell(
-        topology=SizingTopology.IDEAL_GLOBAL_KVS,
+        topology=SizingTopology.ZERO_TRANSFER_PRICE_CONTROL,
         **common,
     )
     local = run_sizing_cell(topology=SizingTopology.LOCAL_ONLY, **common)
@@ -253,13 +253,13 @@ def test_ideal_global_kvs_allows_remote_hit_without_transfer_work() -> None:
     assert local.remote_hit_tokens == 0
 
 
-def test_ideal_control_changes_only_transfer_price_not_routing_threshold() -> None:
+def test_zero_transfer_control_changes_only_price_not_routing_threshold() -> None:
     workload = build_kernel_requests([_trace_row("one", 0, ("A",), (10,))])
     cost = sizing._sizing_cost(
-        SERVICE_REGIMES[2], SizingTopology.IDEAL_GLOBAL_KVS, 1.0, 16
+        SERVICE_REGIMES[2], SizingTopology.ZERO_TRANSFER_PRICE_CONTROL, 1.0, 16
     )
     policy = sizing._sizing_policy(
-        SizingTopology.IDEAL_GLOBAL_KVS, cost, workload
+        SizingTopology.ZERO_TRANSFER_PRICE_CONTROL, cost, workload
     )
     assert cost.kvs_work_per_token == 0
     assert policy.mooncake_balancing_threshold == 2.0

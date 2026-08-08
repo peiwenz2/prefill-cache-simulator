@@ -1,7 +1,7 @@
 """Deterministic minimum-prefill-capacity evaluation for the M12 kernel.
 
-All quantities in this module are normalized simulation units.  Ideal global KVS
-is a control and is mechanically excluded from deployable sizing verdicts.
+All quantities in this module are normalized simulation units.  The zero-transfer
+price topology is a control and is mechanically excluded from deployable verdicts.
 """
 
 from __future__ import annotations
@@ -27,11 +27,11 @@ from .m12_placement import (
 class SizingTopology(StrEnum):
     LOCAL_ONLY = "LOCAL_ONLY"
     SHARED_KVS = "SHARED_KVS"
-    IDEAL_GLOBAL_KVS = "IDEAL_GLOBAL_KVS_CONTROL"
+    ZERO_TRANSFER_PRICE_CONTROL = "ZERO_TRANSFER_PRICE_CONTROL"
 
     @property
     def deployable(self) -> bool:
-        return self is not SizingTopology.IDEAL_GLOBAL_KVS
+        return self is not SizingTopology.ZERO_TRANSFER_PRICE_CONTROL
 
 
 @dataclass(frozen=True, slots=True)
@@ -397,7 +397,7 @@ def _sizing_cost(
 ) -> FrozenKernelCostModel:
     kvs_work = (
         0.0
-        if topology is SizingTopology.IDEAL_GLOBAL_KVS
+        if topology is SizingTopology.ZERO_TRANSFER_PRICE_CONTROL
         else regime.kvs_byte_work * kvs_bytes_per_token * cost_scale
     )
     return FrozenKernelCostModel(
