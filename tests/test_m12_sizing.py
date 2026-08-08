@@ -265,6 +265,16 @@ def test_zero_transfer_control_changes_only_price_not_routing_threshold() -> Non
     assert policy.mooncake_balancing_threshold == 2.0
 
 
+def test_topology_controls_hold_routing_mode_and_threshold_constant() -> None:
+    workload = build_kernel_requests([_trace_row("one", 0, ("A",), (10,))])
+    policies = []
+    for topology in SizingTopology:
+        cost = sizing._sizing_cost(SERVICE_REGIMES[2], topology, 1.0, 16)
+        policies.append(sizing._sizing_policy(topology, cost, workload))
+    assert {policy.mode for policy in policies} == {sizing.PlacementMode.HYBRID}
+    assert {policy.mooncake_balancing_threshold for policy in policies} == {2.0}
+
+
 def test_sizing_cell_resizes_cohort_eligibility_to_requested_p_count() -> None:
     workload = build_kernel_requests(
         [_trace_row("one", 0, ("A",), (10,))]

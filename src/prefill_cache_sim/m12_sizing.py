@@ -415,7 +415,9 @@ def _sizing_policy(
 ) -> M12PlacementPolicy:
     if topology is SizingTopology.LOCAL_ONLY:
         return M12PlacementPolicy(
-            PlacementMode.S4,
+            # Hold routing policy constant across topology controls.  Only
+            # remote-cache visibility and its transfer price may differ.
+            PlacementMode.HYBRID,
             cost,
             kvs_enabled=False,
             request_truth=workload.request_truth,
