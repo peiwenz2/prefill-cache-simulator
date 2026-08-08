@@ -49,7 +49,7 @@ class SelectorOwner(StrEnum):
     one of these.
     """
 
-    FLEXLB_MASTER = "FLEXLB_MASTER"
+    CENTRALIZED_MASTER = "CENTRALIZED_MASTER"
     TURBO_CACHE_AWARE = "TURBO_CACHE_AWARE"
     NONE = "NONE"
 
@@ -243,7 +243,7 @@ class ChainConfig:
     """
 
     mode: EnforcementMode = EnforcementMode.OFF
-    owner: SelectorOwner = SelectorOwner.FLEXLB_MASTER
+    owner: SelectorOwner = SelectorOwner.CENTRALIZED_MASTER
     test_workspace: bool = False
     max_view_age_ms: int = 200
     lease_schedule: tuple[int, ...] = (8, 8, 14)

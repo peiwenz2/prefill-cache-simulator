@@ -82,7 +82,7 @@ def test_fixed_total_capacity_partition_preserves_exact_total() -> None:
         "S2_LEAST_WORK",
         "S3_GB_PREFIX_BUCKET",
         "S4_SESSION_AFFINITY",
-        "S5_FLEXLB_TTFT",
+        "S5_CENTRALIZED_MASTER_TTFT",
         "S6_CALIBRATED_TTFT",
     ],
 )

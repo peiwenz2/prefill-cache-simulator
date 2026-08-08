@@ -69,7 +69,10 @@ def main() -> int:
             "kvs_candidates": ["S4_SESSION_AFFINITY", "S3_GB_PREFIX_BUCKET"],
             "frontier_rule": "material expansion of S3/S4 hit-skew frontier",
             "hit_epsilon": 0.001,
-            "stop_complex_selectors": ["S5_FLEXLB_TTFT", "S6_CALIBRATED_TTFT"],
+            "stop_complex_selectors": [
+                "S5_CENTRALIZED_MASTER_TTFT",
+                "S6_CALIBRATED_TTFT",
+            ],
         },
     }
     SUMMARY.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
@@ -180,7 +183,7 @@ def main() -> int:
             for selector in (
                 "S3_GB_PREFIX_BUCKET",
                 "S4_SESSION_AFFINITY",
-                "S5_FLEXLB_TTFT",
+                "S5_CENTRALIZED_MASTER_TTFT",
             )
         ],
     )
@@ -203,7 +206,7 @@ def main() -> int:
     )
     s3 = headline["S3_GB_PREFIX_BUCKET"]
     s4 = headline["S4_SESSION_AFFINITY"]
-    s5 = headline["S5_FLEXLB_TTFT"]
+    s5 = headline["S5_CENTRALIZED_MASTER_TTFT"]
     s6 = headline["S6_CALIBRATED_TTFT"]
     frontier_low = (
         float(s4["token_weighted_hit_rate"]),
@@ -242,7 +245,7 @@ def main() -> int:
 <section id="detail"><h2>2. 策略结果</h2><h3>2.1 PrefixAnchor 不是 k 越大越好</h3>{k_table}<div class="callout warn"><b>机制判断</b>：k sweep 必须同时看 hit 与 skew。S3 的 gain 有一部分来自 ownership concentration，不能只报最高 hit point。</div><h3>2.2 Eviction 排名依赖 selector</h3>{a2_table}<p class="fine">Second-hit admission 的 rejected placement 单独展示；低 eviction 不等于低 pollution。</p></section>
 <section id="eval"><h2>3. Sensitivity 与 mechanism checks</h2><h3>3.1 Stale view</h3>{stale_table}<p class="fine">Delay 按 mean request service time 约 488 normalized ms 取 0.1×／1×／10×；中间档不敏感，0 与 10× 会改变决策。</p><h3>3.2 Capacity：fixed-total 与 fixed-per-node</h3>{capacity_table}<h3>3.3 S5 score tuning 与 frontier gate</h3>{s5_table}<div class="callout warn"><b>Gate 定义</b>：不是单轴比 S3 hit。用 S4（balanced）到 S3（cache ceiling）的 hit-skew 线段作为 baseline frontier，hit epsilon=0.1pp；候选必须落在线段左上方才算 material expansion。S5 best point 仍在线段右下方；S6 相对 S4 仅多约 0.03pp hit，但 skew／queue 更差。</div><h3>3.4 S4 family cap／hot-block exclusion</h3>{s4_table}<p class="fine">Hot percentile 90／95／99 相同，是 <code>hot_threshold≥8</code> floor 在绑定；cap=128／512 相同，说明 headline cap 已进入饱和区。</p><h3>3.5 Seed replay</h3>{seed_table}<p class="fine">结果由 CSV 实时计算。loss_probability=0 时 S3／S4／S5 不消费随机 stream，zero variance 是 deterministic contract check，不当成鲁棒性证据。</p></section>
 <section id="risk"><h2>4. 风险与边界</h2>{table(["风险", "当前状态", "下一步"], [["Normalized service time", "只能做相对排序，不能叫 production TTFT", "Phase B 用 GPU/KVT calibration"], ["S4 conversation proxy", "仅依赖 online prefix family，不是真 session id", "接真实 session selector 对照"], ["S3 overload", "N=8 request skew 3.41×", "保留为 ceiling，不作为默认生产策略"], ["Eviction regret", "当前是 re-access-after-eviction count", "增加 bounded regret window"]])}<div class="callout warn"><b>诚实回答</b>：这批结果验证的是 LOCAL_ONLY cache placement，不证明 KVS、SLO goodput 或 Decode lease 的收益。后者从 M5 开始单独建账。</div></section>
-<section id="rollout"><h2>5. 下一步</h2>{table(["顺序", "动作", "Gate"], [["1", "S4＋S3 接 SHARED_KVS topology", "local／remote／recompute 三类成本分开"], ["2", "用 GPU calibration 替换 normalized work", "TTFT 误差可解释"], ["3", "接真实 Global Batching／FlexLB session signal", "S4 proxy 与 production selector 排序一致"], ["4", "再进入 gated-PD／gated-DP 与 Decode lease", "主指标切 completed goodput＋fairness"]])}<ul><li>S4 是 production-shaped candidate。</li><li>S3 是 cache locality upper control。</li><li>S5／S6 按 M4 stop gate 暂停，不带入 KVS implementation。</li></ul></section>
+<section id="rollout"><h2>5. 下一步</h2>{table(["顺序", "动作", "Gate"], [["1", "S4＋S3 接 SHARED_KVS topology", "local／remote／recompute 三类成本分开"], ["2", "用 GPU calibration 替换 normalized work", "TTFT 误差可解释"], ["3", "接真实 Global Batching／Centralized Master session signal", "S4 proxy 与 production selector 排序一致"], ["4", "再进入 gated-PD／gated-DP 与 Decode lease", "主指标切 completed goodput＋fairness"]])}<ul><li>S4 是 production-shaped candidate。</li><li>S3 是 cache locality upper control。</li><li>S5／S6 按 M4 stop gate 暂停，不带入 KVS implementation。</li></ul></section>
 <section id="ref"><h2>6. 引用</h2>{table(["Artifact", "位置"], [["Raw CSV", "results/m4/results.csv"], ["Machine summary", "results/m4/summary.json"], ["Runner", "scripts/run_m4.py"], ["Result schema", "src/prefill_cache_sim/experiment.py"], ["Design", "DESIGN-v3.md"], ["Mooncake trace SHA", rows[0]["trace_sha256"]], ["Code SHA", rows[0]["git_sha"]]])}</section></main></div><script>const links=[...document.querySelectorAll('nav a')],sections=[...document.querySelectorAll('section')];new IntersectionObserver(es=>es.forEach(e=>{{if(e.isIntersecting){{links.forEach(a=>a.classList.toggle('active',a.hash==='#'+e.target.id))}}}}),{{rootMargin:'-20% 0px -70%'}}).observe;sections.forEach(s=>new IntersectionObserver(es=>es.forEach(e=>{{if(e.isIntersecting)links.forEach(a=>a.classList.toggle('active',a.hash==='#'+e.target.id))}}),{{rootMargin:'-20% 0px -70%'}}).observe(s));</script></body></html>"""
     OUT.write_text(html, encoding="utf-8")
     print(OUT)

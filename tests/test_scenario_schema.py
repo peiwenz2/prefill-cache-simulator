@@ -183,8 +183,8 @@ def test_cache_metric_units_have_canonical_order(
             },
         },
         {
-            "id": "S5_FLEXLB_TTFT",
-            "flexlb": {
+            "id": "S5_CENTRALIZED_MASTER_TTFT",
+            "centralized_master": {
                 "cache_discount": 0.7,
                 "top_fraction": 0.3,
                 "similar_band_ratio": 0.1,
@@ -216,7 +216,7 @@ def test_each_phase_a_selector_has_a_valid_explicit_shape(
     [
         ("S3_GB_PREFIX_BUCKET", "affinity"),
         ("S4_SESSION_AFFINITY", "affinity"),
-        ("S5_FLEXLB_TTFT", "flexlb"),
+        ("S5_CENTRALIZED_MASTER_TTFT", "centralized_master"),
         ("S6_CALIBRATED_TTFT", "calibrated"),
     ],
 )
@@ -237,7 +237,7 @@ def test_irrelevant_selector_parameters_are_rejected(
     validator: Draft202012Validator,
 ) -> None:
     changed = copy.deepcopy(baseline)
-    changed["selector"]["flexlb"] = {
+    changed["selector"]["centralized_master"] = {
         "cache_discount": 0.7,
         "top_fraction": 0.3,
         "similar_band_ratio": 0.1,

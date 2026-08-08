@@ -19,7 +19,7 @@ from .identity import NamedSeedManager
 from .interfaces import BlockEvictionPolicy, PrefillNodeSelector
 from .selectors import (
     CalibratedTtftSelector,
-    FlexLbTtftSelector,
+    CentralizedMasterTtftSelector,
     LeastWorkSelector,
     RandomSelector,
     RoundRobinSelector,
@@ -186,8 +186,10 @@ def selector_for(case: ExperimentCase) -> PrefillNodeSelector:
             case.hot_block_percentile,
         )
         return session_affinity_selector(provider, soft_alpha=case.soft_alpha)
-    if case.selector_id == "S5_FLEXLB_TTFT":
-        return FlexLbTtftSelector(case.cache_discount, 0.3, case.similar_band_ratio)
+    if case.selector_id == "S5_CENTRALIZED_MASTER_TTFT":
+        return CentralizedMasterTtftSelector(
+            case.cache_discount, 0.3, case.similar_band_ratio
+        )
     if case.selector_id == "S6_CALIBRATED_TTFT":
         return CalibratedTtftSelector(
             case.prefill_uncached_token_ms, case.similar_band_ratio

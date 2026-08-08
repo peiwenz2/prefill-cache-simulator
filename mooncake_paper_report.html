@@ -231,7 +231,7 @@ p = argmin TTFT;  d = 按负载选 decode 节点
 
 <div class="box map">
   <div class="tag">映射 → 我们的 DESIGN.md</div>
-  <p>Algorithm 1 ≈ 我们的 <strong>M1（可标定相对 TTFT）+ M2 的 REJECT 分支</strong>。flexlb 的 <code style="font-family:var(--mono)">tokens×1.0 − hit×0.7 + queueTime</code> 是它的线性简化版（缺离线标定、缺 T_transfer、缺 SLO 门槛）。Mooncake 比 flexlb 多的三样：标定的非线性 T_prefill、显式 T_transfer 项、SLO 硬门槛；比我们 M3 少的：SLO 只是 pass/fail 门槛而非按违约概率定价，路由与淘汰也没合账（cache 池淘汰仍是独立的 LRU/LFU）。</p>
+  <p>Algorithm 1 ≈ 我们的 <strong>M1（可标定相对 TTFT）+ M2 的 REJECT 分支</strong>。centralized_master 的 <code style="font-family:var(--mono)">tokens×1.0 − hit×0.7 + queueTime</code> 是它的线性简化版（缺离线标定、缺 T_transfer、缺 SLO 门槛）。Mooncake 比 centralized_master 多的三样：标定的非线性 T_prefill、显式 T_transfer 项、SLO 硬门槛；比我们 M3 少的：SLO 只是 pass/fail 门槛而非按违约概率定价，路由与淘汰也没合账（cache 池淘汰仍是独立的 LRU/LFU）。</p>
 </div>
 
 <!-- ============ 6 ============ -->

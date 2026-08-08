@@ -52,7 +52,7 @@
 | S2 | LeastWork | 谁最闲发谁 | 朴素负载均衡 |
 | S3 | GBPrefixBucket | 按前缀桶粘住节点，让同前缀请求聚堆 | Turbo CacheAwareScheduler／Sticky bucket（`DESIGN-v3.md` §1 引 `CacheAwareScheduler.java:1196-1202`） |
 | S4 | SessionAffinity | 同 session 粘同节点，在线建链 + 热 block 排除 + family 上限 | Session 亲和 |
-| S5 | FlexLbTtft | 打分 `queue_ms + input_tokens − 0.7×hit_tokens`，取 top-30% 带内随机 | RTP-LLM ShortestTTFTStrategy |
+| S5 | CentralizedMasterTtft | 打分 `queue_ms + input_tokens − 0.7×hit_tokens`，取 top-30% 带内随机 | RTP-LLM ShortestTTFTStrategy |
 | S6 | CalibratedTtft | S5 加标定系数 | 同上 |
 | S7 | CacheSlo | 缓存与 SLO 混合打分 | 混合 |
 
@@ -115,7 +115,7 @@ E0 FIFO、E1 LRU、E2 SLRU、E3 二次命中准入 + LRU、E4 链感知价值淘
 | S0 Random | 0.4430 | — | — |
 | S3 GBPrefixBucket | 0.5401 | 3103.48 | 1.822 |
 | S4 SessionAffinity | 0.5334 | 3011.46 | 1.047 |
-| S5 FlexLbTtft | 0.5232 | 6589.08 | — |
+| S5 CentralizedMasterTtft | 0.5232 | 6589.08 | — |
 
 结论：S3 命中最高但偏斜大；S4 略低但均衡好；S5 排队恶化、被 stop gate 淘汰。
 
@@ -197,7 +197,7 @@ M12 新增第三条研究线：它不等待生产 owner 签字，可以先在 CP
 
 | 门 | 内容 | 关键条件 |
 |---|---|---|
-| G0 | owner sign-off | FlexLB（push 版图）与 Turbo（pull 版图）owner 对 RFC §2 attach 方式签字；Turbo pull-shadow 语义需 owner 确认 |
+| G0 | owner sign-off | Centralized Master（push 版图）与 Turbo（pull 版图）owner 对 RFC §2 attach 方式签字；Turbo pull-shadow 语义需 owner 确认 |
 | G1' R0 | enforcement=off，只建指标管线 | RFC §8 观测指标落地 |
 | R1 | shadow 3 天 | 影子决策与线上决策 diff 报告，零 enforce |
 | G4 R2 | 单 deployment canary enforce | R1 通过后 |
@@ -206,7 +206,7 @@ M12 新增第三条研究线：它不等待生产 owner 签字，可以先在 CP
 
 ### 6.3 M11 RFC 已定的关键决策（`docs/m11-production-rfc.md`）
 
-- attach 点：把**带版本的打分函数**交付给现有版图 owner（FlexLB master 是 push 型，Turbo CacheAwareScheduler 是 pull 型），**不建第三张全局图**。
+- attach 点：把**带版本的打分函数**交付给现有版图 owner（centralized master 是 push 型，Turbo CacheAwareScheduler 是 pull 型），**不建第三张全局图**。
 - WHERE 与生命周期分离：selector 只回答 WHERE（`LegRoute { prefer_host, exclude_hosts, hint_input_tokens }`）；LLMClientV1 保有 logical_request_id、attempt 身份、重试预算、续段、OutputAuthority（epoch + output_seq 围栏）、durable output-ack ledger。
 - 四档 enforcement：off｜shadow｜enforce｜required；fail-open 五种原因计数（timeout／error／stale view／capability mismatch／planner unavailable）。
 - 能力握手：PREFIX_CACHE_QUERY、DECODE_LEASE_V1、R2_CHECKPOINT_STORE、COOPERATIVE_PREEMPT；**未握手实例按零能力对待**。

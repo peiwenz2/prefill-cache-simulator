@@ -52,10 +52,10 @@ def enforce_config(
     d2_gate_open: bool = False,
     preemption: PreemptionConfig | None = None,
 ) -> ChainConfig:
-    """``enforce`` on FlexLB master, D2 gate closed. The rollout target state."""
+    """``enforce`` on centralized master, D2 gate closed. The rollout target state."""
     return ChainConfig(
         mode=EnforcementMode.ENFORCE,
-        owner=SelectorOwner.FLEXLB_MASTER,
+        owner=SelectorOwner.CENTRALIZED_MASTER,
         max_view_age_ms=200,
         lease_schedule=(8, 8, 14),
         max_rounds=3,

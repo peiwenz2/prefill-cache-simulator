@@ -30,7 +30,7 @@ without touching the real one. A restarted process reopens the same file and
 keeps appending; nothing is rewritten.
 
 The R1 :class:`PairReporter` reads a sink back and judges every pair. For a
-push-based owner (:attr:`~.protocol.SelectorOwner.FLEXLB_MASTER`) a missing
+push-based owner (:attr:`~.protocol.SelectorOwner.CENTRALIZED_MASTER`) a missing
 shadow choice is a defect; for a pull-based owner
 (:attr:`~.protocol.SelectorOwner.TURBO_CACHE_AWARE`) the shadow comparison is
 structurally unresolved, because the pull dispatch loop has no channel a push
@@ -212,8 +212,7 @@ class DecisionRecord:
             f"got {self.schema_version!r}",
         )
         check(
-            isinstance(self.logical_request_id, str)
-            and bool(self.logical_request_id),
+            isinstance(self.logical_request_id, str) and bool(self.logical_request_id),
             context,
             "logical_request_id must be a non-empty string",
         )
@@ -320,8 +319,7 @@ class DecisionRecord:
         check(
             len(self.feature) <= MAX_FEATURE_KEYS,
             context,
-            f"feature has {len(self.feature)} keys, at most "
-            f"{MAX_FEATURE_KEYS} allowed",
+            f"feature has {len(self.feature)} keys, at most {MAX_FEATURE_KEYS} allowed",
         )
         for name, value in self.feature.items():
             check(
@@ -464,9 +462,7 @@ class DecisionSink:
             )
         timing = float(self._clock())
         if not math.isfinite(timing) or timing < 0:
-            raise ValueError(
-                f"clock must return non-negative finite, got {timing!r}"
-            )
+            raise ValueError(f"clock must return non-negative finite, got {timing!r}")
         stamped = DecisionRecord(
             record.schema_version,
             record.logical_request_id,
@@ -528,7 +524,7 @@ class DecisionSink:
 class PushObserver(Protocol):
     """A generic sink for decision records.
 
-    Any component that routes traffic -- the chain harness, a real FlexLB
+    Any component that routes traffic -- the chain harness, a real Centralized Master
     adapter, a Turbo pull-loop shim -- can implement this and hand it to the
     decision source. The protocol is deliberately minimal: one record in, nothing
     out, because the observer's job is to persist, not to advise.
@@ -603,8 +599,7 @@ class DiffReport:
             "schema_version": self.schema_version,
             "total_records": self.total_records,
             "pair_counts": {
-                status.value: self.pair_counts.get(status, 0)
-                for status in PairStatus
+                status.value: self.pair_counts.get(status, 0) for status in PairStatus
             },
             "disagree_records": list(self.disagree_records),
             "missing_records": list(self.missing_records),

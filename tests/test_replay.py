@@ -886,7 +886,7 @@ def test_shadow_gate_withholds_and_records_every_failed_reason() -> None:
         minimum_tau_b=0.6,
     ).decide(
         baseline_arm_id="S0_RANDOM",
-        candidate_arm_id="S5_FLEXLB_TTFT",
+        candidate_arm_id="S5_CENTRALIZED_MASTER_TTFT",
         reconciled_fraction=0.5,
         disagreement_fraction=0.4,
         tau_b=0.1,
@@ -1047,13 +1047,13 @@ def test_default_plan_matches_the_m10_arm_matrix() -> None:
     assert tuple(arm.arm_id for arm in DEFAULT_ARMS) == (
         "S0_RANDOM",
         "S3_GB_PREFIX_BUCKET",
-        "S5_FLEXLB_TTFT",
+        "S5_CENTRALIZED_MASTER_TTFT",
         "S4_SESSION_AFFINITY",
     )
     roles = {arm.arm_id: arm.role for arm in DEFAULT_ARMS}
     assert roles["S0_RANDOM"] is ArmRole.BASELINE
     assert roles["S4_SESSION_AFFINITY"] is ArmRole.M4_WINNER
-    assert roles["S5_FLEXLB_TTFT"] is ArmRole.STOP_GATED
+    assert roles["S5_CENTRALIZED_MASTER_TTFT"] is ArmRole.STOP_GATED
     assert ReplayPlan().node_count == 4
 
 
@@ -1205,7 +1205,7 @@ def test_shadow_decisions_from_a_replay_are_recorded_but_not_enforced() -> None:
     assert len(decisions) == 3
     assert {decision.candidate_arm_id for decision in decisions} == {
         "S3_GB_PREFIX_BUCKET",
-        "S5_FLEXLB_TTFT",
+        "S5_CENTRALIZED_MASTER_TTFT",
         "S4_SESSION_AFFINITY",
     }
     assert all(decision.enforced is False for decision in decisions)

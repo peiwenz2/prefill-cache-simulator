@@ -49,7 +49,7 @@ def _record(
     *,
     logical_request_id: str = "trace:abc:00000000000000000000",
     attempt_index: int = 0,
-    owner: SelectorOwner = SelectorOwner.FLEXLB_MASTER,
+    owner: SelectorOwner = SelectorOwner.CENTRALIZED_MASTER,
     mode: EnforcementMode = EnforcementMode.SHADOW,
     online_host: str = "host-a",
     shadow_host: str | None = "host-b",
@@ -261,9 +261,7 @@ def test_nan_constant_rejected_at_sink_boundary(tmp_path: Path) -> None:
     # The NaN literal is not valid JSON; read_all must reject it.
     with open(path, "a", encoding="utf-8") as handle:
         handle.write(
-            json.dumps(
-                {"schema_version": DECISION_SCHEMA_VERSION, "timing_ms": "NaN"}
-            )
+            json.dumps({"schema_version": DECISION_SCHEMA_VERSION, "timing_ms": "NaN"})
             + "\n"
         )
     with pytest.raises(MalformedPayloadError):
@@ -320,7 +318,7 @@ def test_harness_pushes_decision_to_observer(tmp_path: Path) -> None:
     observer = JsonlPushObserver(sink)
     config = ChainConfig(
         mode=EnforcementMode.SHADOW,
-        owner=SelectorOwner.FLEXLB_MASTER,
+        owner=SelectorOwner.CENTRALIZED_MASTER,
     )
     harness = ChainHarness(
         config,
@@ -339,7 +337,7 @@ def test_harness_pushes_decision_to_observer(tmp_path: Path) -> None:
     records = sink.read_all()
     assert len(records) == 1
     record = records[0]
-    assert record.owner is SelectorOwner.FLEXLB_MASTER
+    assert record.owner is SelectorOwner.CENTRALIZED_MASTER
     assert record.mode is EnforcementMode.SHADOW
     assert record.online_host == "h-a"
     assert record.shadow_host == "h-b"
@@ -366,7 +364,7 @@ def test_record_round_trips(tmp_path: Path) -> None:
     original = _record(
         logical_request_id="trace:feed:00000000000000000001",
         attempt_index=3,
-        owner=SelectorOwner.FLEXLB_MASTER,
+        owner=SelectorOwner.CENTRALIZED_MASTER,
         mode=EnforcementMode.SHADOW,
         online_host="h-x",
         shadow_host="h-y",
@@ -385,7 +383,7 @@ def test_record_round_trips(tmp_path: Path) -> None:
     record = records[0]
     assert record.logical_request_id == original.logical_request_id
     assert record.attempt_index == 3
-    assert record.owner is SelectorOwner.FLEXLB_MASTER
+    assert record.owner is SelectorOwner.CENTRALIZED_MASTER
     assert record.online_host == "h-x"
     assert record.shadow_host == "h-y"
     assert record.fallback is FailOpenReason.SELECTOR_TIMEOUT
@@ -520,7 +518,7 @@ def test_observer_exception_does_not_break_routing(tmp_path: Path) -> None:
     observer = _ExplodingObserver()
     config = ChainConfig(
         mode=EnforcementMode.SHADOW,
-        owner=SelectorOwner.FLEXLB_MASTER,
+        owner=SelectorOwner.CENTRALIZED_MASTER,
     )
     harness = ChainHarness(
         config,
@@ -528,9 +526,7 @@ def test_observer_exception_does_not_break_routing(tmp_path: Path) -> None:
         observer=observer,
     )
     harness.handshake(Capabilities(), Capabilities())
-    snapshot = ViewSnapshot(
-        epoch=1, age_ms=5, candidates=("h-a",), cached_tokens=(10,)
-    )
+    snapshot = ViewSnapshot(epoch=1, age_ms=5, candidates=("h-a",), cached_tokens=(10,))
     selection = harness.select(snapshot)  # must not raise
     assert selection.outcome.value is not None
     assert observer.calls == 1
@@ -547,7 +543,7 @@ def test_shadow_hit_tokens_absent_when_host_unknown() -> None:
     observer = JsonlPushObserver(sink)
     config = ChainConfig(
         mode=EnforcementMode.SHADOW,
-        owner=SelectorOwner.FLEXLB_MASTER,
+        owner=SelectorOwner.CENTRALIZED_MASTER,
     )
     harness = ChainHarness(
         config,
@@ -556,9 +552,7 @@ def test_shadow_hit_tokens_absent_when_host_unknown() -> None:
     )
     harness.handshake(Capabilities(), Capabilities())
     # h-a is the only candidate; selector would choose it (most cached).
-    snapshot = ViewSnapshot(
-        epoch=1, age_ms=5, candidates=("h-a",), cached_tokens=(10,)
-    )
+    snapshot = ViewSnapshot(epoch=1, age_ms=5, candidates=("h-a",), cached_tokens=(10,))
     harness.select(snapshot)
     sink.close()
     # Read what was written by re-reading the file.

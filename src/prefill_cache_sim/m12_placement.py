@@ -43,7 +43,7 @@ class PlacementMode(StrEnum):
     PRICED_SPILL = "PRICED_SPILL"
     S3 = "S3_GB_PREFIX_BUCKET"
     S4 = "S4_SESSION_AFFINITY"
-    S5 = "S5_FLEXLB_TTFT"
+    S5 = "S5_CENTRALIZED_MASTER_TTFT"
     S6 = "S6_CALIBRATED_TTFT"
 
 
@@ -206,8 +206,8 @@ class M12PlacementPolicy(KernelPolicy):
 
     eviction_regret_work = 0.0
     decode_debt_work = 0.0
-    flexlb_cache_discount = 0.7
-    flexlb_top_fraction = 0.3
+    centralized_cache_discount = 0.7
+    centralized_top_fraction = 0.3
     similar_band_ratio = 0.1
 
     def __init__(
@@ -431,7 +431,7 @@ class M12PlacementPolicy(KernelPolicy):
                 score = (
                     queue
                     + request.logical.input_tokens
-                    - self.flexlb_cache_discount * local
+                    - self.centralized_cache_discount * local
                 )
             elif self.mode is PlacementMode.S6:
                 score = (
@@ -459,7 +459,7 @@ class M12PlacementPolicy(KernelPolicy):
         best_score = scored[0][0]
         band = max(1.0, abs(best_score) * self.similar_band_ratio)
         if self.mode is PlacementMode.S5:
-            top_count = max(1, math.ceil(len(scored) * self.flexlb_top_fraction))
+            top_count = max(1, math.ceil(len(scored) * self.centralized_top_fraction))
             eligible = [
                 value for value in scored[:top_count] if value[0] <= best_score + band
             ]

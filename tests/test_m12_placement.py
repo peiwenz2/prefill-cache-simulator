@@ -153,7 +153,7 @@ def test_fixed_workload_and_horizon_are_identical_in_pair_runner() -> None:
         "PRICED_SPILL",
         "S3_GB_PREFIX_BUCKET",
         "S4_SESSION_AFFINITY",
-        "S5_FLEXLB_TTFT",
+        "S5_CENTRALIZED_MASTER_TTFT",
         "S6_CALIBRATED_TTFT",
     }
 
@@ -176,12 +176,15 @@ def test_named_anchor_modes_are_stable_and_hybrid_is_mooncake_anchor() -> None:
     assert PlacementMode.HYBRID.value == "HYBRID"
     assert PlacementMode.S3.value == "S3_GB_PREFIX_BUCKET"
     assert PlacementMode.S4.value == "S4_SESSION_AFFINITY"
-    assert PlacementMode.S5.value == "S5_FLEXLB_TTFT"
+    assert PlacementMode.S5.value == "S5_CENTRALIZED_MASTER_TTFT"
     assert PlacementMode.S6.value == "S6_CALIBRATED_TTFT"
     policy = M12PlacementPolicy(
         PlacementMode.S5, config().cost_model, kvs_enabled=False
     )
-    assert (policy.flexlb_cache_discount, policy.flexlb_top_fraction) == (0.7, 0.3)
+    assert (policy.centralized_cache_discount, policy.centralized_top_fraction) == (
+        0.7,
+        0.3,
+    )
 
 
 def test_s4_online_linker_sticks_only_from_past_prefix_history() -> None:
@@ -532,9 +535,7 @@ def test_case_contention_changes_executed_kvs_and_completion() -> None:
             ),
         ]
     )
-    cases = build_m12_2_cases(
-        horizon=100_000, tier_slo_work={"STANDARD": 100_000}
-    )
+    cases = build_m12_2_cases(horizon=100_000, tier_slo_work={"STANDARD": 100_000})
     normal = next(
         c
         for c in cases
@@ -563,11 +564,8 @@ def test_case_contention_changes_executed_kvs_and_completion() -> None:
 def test_case_contention_is_applied_once_to_policy_and_kernel_costs() -> None:
     case = next(
         case
-        for case in build_m12_2_cases(
-            horizon=100, tier_slo_work={"STANDARD": 20}
-        )
-        if case.kvs_contention_multiplier > 1
-        and case.kvs_mode is KvsPriceMode.NORMAL
+        for case in build_m12_2_cases(horizon=100, tier_slo_work={"STANDARD": 20})
+        if case.kvs_contention_multiplier > 1 and case.kvs_mode is KvsPriceMode.NORMAL
     )
     executed = _case_cost(case)
     policy_base = _case_cost(case, include_contention=False)

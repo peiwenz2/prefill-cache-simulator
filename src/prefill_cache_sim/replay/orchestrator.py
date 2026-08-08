@@ -110,7 +110,12 @@ DEFAULT_ARMS: tuple[ReplayArm, ...] = (
     ReplayArm(
         "S3_GB_PREFIX_BUCKET", "S3_GB_PREFIX_BUCKET", "E1_LRU", ArmRole.CANDIDATE
     ),
-    ReplayArm("S5_FLEXLB_TTFT", "S5_FLEXLB_TTFT", "E1_LRU", ArmRole.STOP_GATED),
+    ReplayArm(
+        "S5_CENTRALIZED_MASTER_TTFT",
+        "S5_CENTRALIZED_MASTER_TTFT",
+        "E1_LRU",
+        ArmRole.STOP_GATED,
+    ),
     ReplayArm(M4_WINNER_ARM_ID, "S4_SESSION_AFFINITY", "E1_LRU", ArmRole.M4_WINNER),
 )
 

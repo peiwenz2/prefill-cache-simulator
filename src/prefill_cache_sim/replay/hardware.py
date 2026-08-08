@@ -149,7 +149,7 @@ def plan_digest(plan: ReplayPlan) -> str:
 #: ``ReplayPlan`` that alters the serialized form must update this literal and
 #: be reviewed; the assertion below catches silent drift at import time so a
 #: stale digest cannot pass through undetected.
-FROZEN_PLAN_DIGEST = "e3f13a2e150ee6563d433b7de2e431d55e5effda7b9254c114cacf94d9c3bbd4"
+FROZEN_PLAN_DIGEST = "57f4bc3f1cc8f3f4a8f84a4cd87aba00bda4fb934ce5332cdc109f534a579100"
 assert plan_digest(ReplayPlan()) == FROZEN_PLAN_DIGEST, (
     "FROZEN_PLAN_DIGEST has drifted: ReplayPlan defaults changed but the "
     "literal was not updated. Update the literal after review."

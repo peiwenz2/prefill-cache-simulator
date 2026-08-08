@@ -1076,9 +1076,13 @@ def test_turbo_pull_owner_has_no_push_preference_channel() -> None:
     assert selection.host == SELECTOR_PICK
     assert selection.preference_ignored is True
     assert turbo.counters["selector_pref_ignored_total"] == 1
-    flexlb = ChainHarness(enforce_config(), scenario="flexlb_push")
-    full_handshake(flexlb)
-    matched = flexlb.select(fresh_view(), LegRoute(prefer_host=SELECTOR_PICK))
+    centralized_master = ChainHarness(
+        enforce_config(), scenario="centralized_master_push"
+    )
+    full_handshake(centralized_master)
+    matched = centralized_master.select(
+        fresh_view(), LegRoute(prefer_host=SELECTOR_PICK)
+    )
     assert matched.preference_ignored is False
 
 

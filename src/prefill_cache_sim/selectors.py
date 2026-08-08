@@ -210,7 +210,7 @@ def session_affinity_selector(
 
 
 @dataclass(frozen=True, slots=True)
-class FlexLbTtftSelector:
+class CentralizedMasterTtftSelector:
     cache_discount: float = 0.7
     top_fraction: float = 0.3
     similar_band_ratio: float = 0.1

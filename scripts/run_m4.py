@@ -21,10 +21,10 @@ SELECTORS = (
     "S2_LEAST_WORK",
     "S3_GB_PREFIX_BUCKET",
     "S4_SESSION_AFFINITY",
-    "S5_FLEXLB_TTFT",
+    "S5_CENTRALIZED_MASTER_TTFT",
     "S6_CALIBRATED_TTFT",
 )
-TOP3 = ("S3_GB_PREFIX_BUCKET", "S4_SESSION_AFFINITY", "S5_FLEXLB_TTFT")
+TOP3 = ("S3_GB_PREFIX_BUCKET", "S4_SESSION_AFFINITY", "S5_CENTRALIZED_MASTER_TTFT")
 
 
 def base_case(case_id: str, selector: str) -> ExperimentCase:
@@ -63,7 +63,7 @@ def matrix() -> list[ExperimentCase]:
             base_case(f"A2-{selector}-{eviction}", selector),
             eviction_id=eviction,
         )
-        for selector in ("S3_GB_PREFIX_BUCKET", "S5_FLEXLB_TTFT")
+        for selector in ("S3_GB_PREFIX_BUCKET", "S5_CENTRALIZED_MASTER_TTFT")
         for eviction in (
             "E0_FIFO",
             "E1_LRU",
@@ -125,14 +125,14 @@ def matrix() -> list[ExperimentCase]:
     ]
     cases += [
         replace(
-            base_case(f"S5-DISCOUNT-{discount}", "S5_FLEXLB_TTFT"),
+            base_case(f"S5-DISCOUNT-{discount}", "S5_CENTRALIZED_MASTER_TTFT"),
             cache_discount=discount,
         )
         for discount in (0.25, 0.7, 1.0, 2.0)
     ]
     cases += [
         replace(
-            base_case(f"S5-BAND-{band}", "S5_FLEXLB_TTFT"),
+            base_case(f"S5-BAND-{band}", "S5_CENTRALIZED_MASTER_TTFT"),
             similar_band_ratio=band,
         )
         for band in (0.01, 0.05, 0.1, 0.2)

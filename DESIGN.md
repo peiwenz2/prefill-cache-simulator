@@ -1,7 +1,7 @@
 # Prefill 路由 × KV Cache × SLO：从 basic 到 inspired 的统一设计
 
 > 输入：Mooncake FAST'25 trace（`mooncake_trace.jsonl`，本目录）
-> 语境：本地仓库实锤（rtp-llm flexlb、dashscope-platform turbo、dashserving LLMClientV1、
+> 语境：本地仓库实锤（rtp-llm centralized_master、dashscope-platform turbo、dashserving LLMClientV1、
 > dashllm、vllm_pai、v6d、blade-kvt、tilert-serve-pd、Gated-PD 设计稿）
 > 状态：**v2**。v1 的"策略分家式"设计压缩为 Solution 1；v2 的主体是一个统一目标函数
 > （下称 **magic function**），把 KV cache 命中、request SLO、instance stats、PD reservation
@@ -26,7 +26,7 @@ prefill FLOPs 超线性于 token 数（后续 token 的 attention 随位置增�
 
 ---
 
-## 1. 现状盘点：为什么"策略分家"是错的，flexlb 已经证明了一半
+## 1. 现状盘点：为什么"策略分家"是错的，centralized_master 已经证明了一半
 
 ### 1.1 Turbo 的问题：N 个 selector 类，没有一笔总账
 
@@ -40,14 +40,14 @@ dashscope-turbo 把关注点拆成互斥的策略类：`CacheAwareScheduler`、`
 
 **这不是缺一个更聪明的 selector，是缺一个公共的目标函数。**
 
-### 1.2 flexlb 的启发：半个 magic function（代码实锤）
+### 1.2 centralized_master 的启发：半个 magic function（代码实锤）
 
-rtp-llm `org.flexlb` 的 `ShortestTTFTStrategy` 是本地代码里最接近答案的东西：
+内部中心化 master 的 `ShortestTTFTStrategy` 是本地代码里最接近答案的实现（具体路径脱敏）：
 
 ```java
-// flexlb-common .. TaskInfo.estimatePrefillTimeMs
+// centralized master .. TaskInfo.estimatePrefillTimeMs
 prefillTime = tokens * 1.0 - hitCacheTokens * 0.7      // 命中 token 打 3 折
-// flexlb-sync .. ShortestTTFTStrategy.scoreWorkers
+// centralized master .. ShortestTTFTStrategy.scoreWorkers
 TTFT(worker) = prefillTime + worker.runningQueueTime    // ← 相对 TTFT
 // selectBestWorker: TTFT 升序 → top 30% 候选 → max(0.1·minTTFT, 0.5·stddev) 相似带
 //                → lastSelectedTime 公平性 CAS
@@ -111,7 +111,7 @@ ClusterView（决策时可见的世界，可配置精度）:
 | Random（任务基线）/ RoundRobin / LeastLoaded | FIFO（任务基线）/ LRU |
 | PrefixHash（`consistent_hash(blocks[0..k])`，零同步） | LRU-ChainAware（只逐前缀链叶子） |
 | SessionAffinity（最长已见前缀查表） | SecondRefAdmission（ghost list，第二次引用才缓存，打 F2） |
-| CacheAware（`α·cached_len − β·load`，≈flexlb 简化版） | TTL（标定 F3 的 247s 窗口） |
+| CacheAware（`α·cached_len − β·load`，≈centralized_master 简化版） | TTL（标定 F3 的 247s 窗口） |
 
 指标：token/block/FLOPs-weighted 命中率、归一化达成率(/55.3%)、per-node 负载方差、
 淘汰浪费率（被逐后又被引用/总淘汰）、有效容量利用率、**SLO 达成率（p99 slack）**。
@@ -143,12 +143,12 @@ J(r, π) =  C_compute(π)                    # 重算未命中段的 GPU 秒
 决策 = argmin_π J(r, π)；若 min J 超过该请求的价值预算 → REJECT（early rejection 是特例）
 ```
 
-关键点：**flexlb 的 ShortestTTFT 是 J 在
+关键点：**centralized_master 的 ShortestTTFT 是 J 在
 `λ=0, ΔV=0, C_transfer=0, C_interference=0, P(·) 退化为期望值` 下的特例**。v2 不是推翻
 它，是把它没记的账补上。下面按"从 basic 到 advanced"分四级展开，每一级都可独立落地，
 且是上一级的严格超集——这就是渐进路线。
 
-### 3.1 M1（basic+）：可标定的相对 TTFT —— flexlb 重建版
+### 3.1 M1（basic+）：可标定的相对 TTFT —— centralized_master 重建版
 
 ```
 TTFT_est(r, n) = queue_delay(n)                          # instance stats: 在排 tokens / 吞吐
@@ -157,10 +157,10 @@ TTFT_est(r, n) = queue_delay(n)                          # instance stats: 在�
 
 forwards(r, n) = ceil( (input_tokens − cached_consecutive(r, n)) / chunk_size )
 step_time(·)   = 查表：实机测得的 每-forward 耗时 ~ f(running_batch_tokens)   # 非线性，校准得来
-select         = argmin TTFT_est，加 flexlb 式相似带 + 公平性 tie-break（防抖动照抄）
+select         = argmin TTFT_est，加 centralized_master 式相似带 + 公平性 tie-break（防抖动照抄）
 ```
 
-对 flexlb 的两处修正：① `forwards×step_time` 替换 `1.0·tokens`（EngineCapacityCalculator
+对 centralized_master 的两处修正：① `forwards×step_time` 替换 `1.0·tokens`（EngineCapacityCalculator
 的 forward-pass 视角 + chunked prefill 语义，命中 token 成本自然为 0 而非 0.7 折）；
 ② `step_time` 是**实测校准表**不是常数——这正是"找机器建部署"阶段的第一个产出（§6.2）。
 

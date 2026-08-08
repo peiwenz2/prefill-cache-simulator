@@ -173,7 +173,7 @@ flowchart LR
 # src/prefill_cache_sim/selectors.py:218-238
 hit = cache_hits.get(node.node_id, (0, 0))[1]
 score = load(node) + request.input_tokens - cache_discount * hit
-# FlexLB 风格：queue work 与 saved prefill work 合成一个近似分数。
+# Centralized Master 风格：queue work 与 saved prefill work 合成一个近似分数。
 ```
 
 | 策略 | 决策规则 | M4 token hit | 最大收益点 | 瓶颈／诚实边界 |
@@ -183,7 +183,7 @@ score = load(node) + request.input_tokens - cache_discount * hit
 | S2 LeastWork | 最少 running＋queued tokens | 43.67% | 负载感知 | 主动打散 prefix，命中最低 |
 | S3 GBPrefixBucket | prefix anchor stable owner；过载 bounded fallback | **54.01%** | delayed view 下最大化 locality | load max/mean=1.822；不是无条件 winner |
 | S4 SessionAffinity | 在线 conversation link＋sticky owner | 53.34% | 命中接近 S3，load max/mean=1.047 | trace 没有真实 session_id，linker 是推断 |
-| S5 FlexLbTtft | queue＋input−0.7×hit | 52.32% | fresh view 下 hit／queue 同时最好 | 50ms stale view 触发 herding，queue p95=6589 |
+| S5 CentralizedMasterTtft | queue＋input−0.7×hit | 52.32% | fresh view 下 hit／queue 同时最好 | 50ms stale view 触发 herding，queue p95=6589 |
 | S6 CalibratedTtft | `(load＋uncached)×coefficient` | 53.37% | 接近 Mooncake estimated TTFT 形式 | coefficient 仍是 synthetic；没有真实 KVT congestion |
 
 S3／S4 的 capacity gate 与 fallback 在 `selectors.py:65-119,127-209`。S5／S6 在 `selectors.py:212-268`。
@@ -212,7 +212,7 @@ S2 是重要反例：动态追“最闲”不一定减少排队。多个请求�
 
 #### 2.2.3 S3 GBPrefixBucket：代码里到底是哪一个 selector
 
-S3 对应 `src/prefill_cache_sim/selectors.py:182-194` 的 `gb_prefix_bucket_selector()`。它不是 FlexLB，也不是全局 batching 本身；“GB”表示用 Global Batching 风格的 prefix bucket owner 思路做的实验策略。
+S3 对应 `src/prefill_cache_sim/selectors.py:182-194` 的 `gb_prefix_bucket_selector()`。它不是 Centralized Master，也不是全局 batching 本身；“GB”表示用 Global Batching 风格的 prefix bucket owner 思路做的实验策略。
 
 ```python
 return AffinitySelector(
@@ -261,9 +261,9 @@ S4 对应 `session_affinity_selector()`＋`OnlineConversationLinker`。它不是
 
 hot-only exclusion 防止公共 system prompt 把全流量合并成一个“假 session”；family cap 防止一个大 conversation family 永久霸占一台 node。M4 中它得到 53.34% hit、load max／mean 1.047、queue p95 3011：比 S3 少 0.67pp hit，但把严重偏斜压回近似均衡。因此在 delayed-view 契约里，S4 是比 S3 更合理的部署候选；生产中应把 proxy key 换成 privacy-safe hashed session key。
 
-#### 2.2.5 S5 FlexLB TTFT：为什么中心化 cache-aware 反而输给 S3
+#### 2.2.5 S5 Centralized Master TTFT：为什么中心化 cache-aware 反而输给 S3
 
-S5 对应 `FlexLbTtftSelector`：
+S5 对应 `CentralizedMasterTtftSelector`：
 
 ```python
 load = running_tokens + queued_uncached_tokens
@@ -284,7 +284,7 @@ M4 headline 中它看起来较差，主因不是公式，而是 **stale-view her
 
 `delay=0` 时，S5 在 hit 与 queue 两轴同时优于 S3／S4；50ms 后 queue 变成 5.4 倍。连用于打散选择的 `last_selected_ms` 也是快照字段，所以同一冻结窗口内的请求会重复选中同一个 node。discount 和 band 扫描只能改变个位数百分比，不能解释 5.4 倍退化。
 
-结论不是“FlexLB 不好”，而是：**中心化 cost selector 的实际能力上限由观测 freshness 决定。生产 FlexLB 是否存在同样问题仍是假说，需要对照真实 view refresh、RPC delay 与 node queue oscillation。**
+结论不是“Centralized Master 不好”，而是：**中心化 cost selector 的实际能力上限由观测 freshness 决定。生产 Centralized Master 是否存在同样问题仍是假说，需要对照真实 view refresh、RPC delay 与 node queue oscillation。**
 
 #### 2.2.6 S6 CalibratedTTFT：校准了什么，为什么没完全救回 S5
 
@@ -306,7 +306,7 @@ score_ms = (queue_tokens + uncached) * prefill_uncached_token_ms
 | S2 LeastWork | 43.67% | 1.012 | **8061** | stale-view 反例 |
 | S3 GBPrefixBucket | **54.01%** | 1.822 | 3103 | locality ceiling probe |
 | S4 SessionAffinity | 53.34% | 1.047 | **3011** | delayed-view Pareto candidate |
-| S5 FlexLB TTFT | 52.32% | 1.646 | 6589 | fresh-view winner／stale-view loser |
+| S5 Centralized Master TTFT | 52.32% | 1.646 | 6589 | fresh-view winner／stale-view loser |
 | S6 CalibratedTTFT | 53.37% | 1.269 | 6393 | 可标定 score，仍受 stale view 限制 |
 
 M4 的可迁移 insight 是一条切换规则：**view 可信时追 cost score；view 不可信时靠 stable ownership；两者之间用 overload gate、bounded choice 与 randomized tie-break 防 herd。**
@@ -404,7 +404,7 @@ D1 的恢复路径在 `decode_lease.py:174-221`；自适应 quantum 在 `decode_
 
 ### 3.1.1 Production baseline 错配警告
 
-`+9.71 pp` 只表示 S3 相对 **Random** 的 locality mechanism gain，不能当作相对线上收益。M4 中 production-style cache-aware baseline 已达到 S5=52.32%、S6=53.37%；S3=54.01% 相对它们只有约 0.6～1.7 pp simulator headroom，S4=53.34% 与 S6 基本持平。DashScope 线上已有 FlexLB／Turbo cache-aware owner，因此任何“生产提升”目前都是 NOT_MEASURED，必须由 R1 shadow 给出。
+`+9.71 pp` 只表示 S3 相对 **Random** 的 locality mechanism gain，不能当作相对线上收益。M4 中 production-style cache-aware baseline 已达到 S5=52.32%、S6=53.37%；S3=54.01% 相对它们只有约 0.6～1.7 pp simulator headroom，S4=53.34% 与 S6 基本持平。DashScope 线上已有 Centralized Master／Turbo cache-aware owner，因此任何“生产提升”目前都是 NOT_MEASURED，必须由 R1 shadow 给出。
 
 S4 更合理的 value statement 是：**在本次 replay 中，用约 0.67 pp token hit 代价，把 request load max/mean 从 1.822 降到 1.047；按原值降幅为 42.5%，按超出理想值 1.0 的 excess-skew 口径降幅约 94%**。这里描述的是 simulator trade-off，不是生产收益。
 
@@ -433,7 +433,7 @@ S3 的 54.01% 距无限单池 token ceiling 57.07% 约 3.06 pp，但有限多节
 
 1. 单纯 prefix routing 已接近 workload ceiling，剩余 hit 空间有限。
 2. Mooncake 自己的 Algorithm 1 也不是最大化 hit，而是比较 `queue＋prefill` 与 `transfer＋queue＋prefill`，并以 TTFT/TBT SLO 决定是否接收。
-3. 你的设计再向前一步：WHERE 仍交给现有 Global Batching／FlexLB／Turbo owner；client 持有 attempt、lease、checkpoint、output authority 和 retry budget。
+3. 你的设计再向前一步：WHERE 仍交给现有 Global Batching／Centralized Master／Turbo owner；client 持有 attempt、lease、checkpoint、output authority 和 retry budget。
 4. 因而同一套账可以回答四个业务问题：发哪台 P、KV 从哪里来、D 是否继续占用、失败后从哪里恢复。
 5. 这部分的价值不受 arxiv trace 57% ceiling 限制，因为它优化的是 completed goodput、fairness 和 wasted GPU work，而不只是 prefix hit。
 

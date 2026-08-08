@@ -11,7 +11,7 @@
 <div class="layout"><nav class="toc"><div class="toc-title">目录</div><a href="#arch">1. 总体架构</a><a href="#design">2. 详细设计</a><a href="#eval">3. 关键技术评估</a><a href="#risk">4. 风险与备选</a><a href="#rollout">5. Rollout</a><a href="#ref">6. 引用</a></nav><main class="content">
 <section id="arch" class="section"><h2>1. 总体架构</h2><div class="tabs" role="tablist"><button class="tab" data-tab="baseline" aria-selected="true">基础模拟</button><button class="tab" data-tab="runtime" aria-selected="false">KVS／SLO runtime</button></div><div class="tab-panel diagram" data-panel="baseline"><svg viewBox="0 0 820 410" role="img" aria-label="基础模拟架构"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#64748b"/></marker><marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#15803d"/></marker></defs>
   <rect class="node" data-node="request" x="35" y="135" width="150" height="64" rx="6" fill="#e8f0ff" stroke="#4338ca" stroke-width="1.5"/><text x="110" y="161" text-anchor="middle" font-size="13" font-weight="650">Mooncake trace</text><text x="110" y="181" text-anchor="middle" font-size="11" fill="#475569">request + hash_ids</text>
-  <rect class="node" data-node="planner" x="245" y="135" width="190" height="64" rx="6" fill="#fff7ed" stroke="#b45309" stroke-width="1.5"/><text x="340" y="161" text-anchor="middle" font-size="13" font-weight="650">Selector + Processor</text><text x="340" y="181" text-anchor="middle" font-size="11" fill="#475569">GB／Session／FlexLB</text>
+  <rect class="node" data-node="planner" x="245" y="135" width="190" height="64" rx="6" fill="#fff7ed" stroke="#b45309" stroke-width="1.5"/><text x="340" y="161" text-anchor="middle" font-size="13" font-weight="650">Selector + Processor</text><text x="340" y="181" text-anchor="middle" font-size="11" fill="#475569">GB／Session／Centralized Master</text>
   <rect class="node" data-node="prefill" x="510" y="55" width="240" height="72" rx="6" fill="#e8f0ff" stroke="#4338ca" stroke-width="1.5"/><text x="630" y="84" text-anchor="middle" font-size="13" font-weight="650">N × Prefill node</text><text x="630" y="104" text-anchor="middle" font-size="11" fill="#475569">capacity gate + queue estimate</text>
   <rect class="node" data-node="decode" x="510" y="155" width="240" height="72" rx="6" fill="#f2f4f9" stroke="#94a3b8" stroke-width="1.5"/><text x="630" y="184" text-anchor="middle" font-size="13" font-weight="650" fill="#64748b">Decode node（Phase A 不模拟）</text><text x="630" y="204" text-anchor="middle" font-size="11" fill="#64748b">D0 fixed completion</text>
   <rect class="node" data-node="kvs" x="510" y="255" width="240" height="72" rx="6" fill="#f2f4f9" stroke="#94a3b8" stroke-width="1.5"/><text x="630" y="284" text-anchor="middle" font-size="13" font-weight="650" fill="#64748b">Shared KVS（Phase A 不模拟）</text><text x="630" y="304" text-anchor="middle" font-size="11" fill="#64748b">LOCAL_ONLY</text>
@@ -195,9 +195,9 @@ lenient_completed_goodput
 <td>定义 selector 可见的 <code>NodeSnapshot</code></td>
 </tr>
 <tr>
-<td>FlexLB <code>ShortestTTFTStrategy</code></td>
+<td>Centralized Master <code>ShortestTTFTStrategy</code></td>
 <td><code>TTFT = queueTime + tokens - 0.7×hitCacheTokens</code>；top 30%＋similar band＋last-selected CAS fairness</td>
-<td>模拟 <code>FlexLbTtftSelector</code>，保持公式版本可替换</td>
+<td>模拟 <code>CentralizedMasterTtftSelector</code>，保持公式版本可替换</td>
 </tr>
 <tr>
 <td>Session affinity shadow 实践</td>
@@ -238,7 +238,7 @@ lenient_completed_goodput
 <p>代码证据版本：</p>
 <ul>
 <li>dashscope-platform：本地缓存的 <code>origin/main@afb893c7e826</code>。本轮 fetch 因内网凭证失败；相关 selector 文件与当前 working commit 内容一致，但开工前仍必须重新 fetch。</li>
-<li>RTP-LLM：<code>origin/main@cd77137bf307</code>；working tree 比它少 18 commit，但本轮引用的两个 FlexLB 文件在两者之间无 diff。</li>
+<li>RTP-LLM：<code>origin/main@cd77137bf307</code>；working tree 比它少 18 commit，但本轮引用的两个 Centralized Master 文件在两者之间无 diff。</li>
 <li>dashserving：已 fetch <code>aone/main@fe13ca3f1c3b</code>；当前 checkout 有用户改动，不读取 checkout 作为 main 真值。</li>
 <li>dashllm：Aone fetch 成功；实现阶段重新钉目标 branch／commit。</li>
 </ul>
@@ -248,9 +248,9 @@ lenient_completed_goodput
 <li><code>dashscope-platform/dashscope-turbo/dashscope-turbo-server/src/main/java/com/alibaba/dashscope/turbo/batch/scheduler/CacheAwareScheduler.java:1295-1339</code>：priority queue＋primary／secondary bucket fetch。</li>
 <li><code>dashscope-platform/dashscope-turbo/dashscope-turbo-server/src/main/java/com/alibaba/dashscope/turbo/batch/scheduler/StickySessionScheduler.java:613-670</code>：bucket → primary／alternative engine。</li>
 <li><code>dashscope-platform/dashscope-turbo/dashscope-turbo-server/src/main/java/com/alibaba/dashscope/turbo/batch/scheduler/StickySessionScheduler.java:752-770</code>：capacity gate＋range fetch。</li>
-<li><code>RTP-LLM/rtp_llm/flexlb/flexlb-common/src/main/java/org/flexlb/dao/master/TaskInfo.java:32-38</code>：FlexLB prefill cost。</li>
-<li><code>RTP-LLM/rtp_llm/flexlb/flexlb-sync/src/main/java/org/flexlb/balance/strategy/ShortestTTFTStrategy.java:187-205</code>：cache hit＋queue 合并成 TTFT。</li>
-<li><code>RTP-LLM/rtp_llm/flexlb/flexlb-sync/src/main/java/org/flexlb/balance/strategy/ShortestTTFTStrategy.java:287-377</code>：similar band＋last-selected fairness。</li>
+<li>内部中心化 master 实现（路径脱敏）：prefill cost。</li>
+<li>内部中心化 master 实现（路径脱敏）：cache hit＋queue 合并成 TTFT。</li>
+<li>内部中心化 master 实现（路径脱敏）：similar band＋last-selected fairness。</li>
 <li><code>~/dev-trees/DECODE_LEASE_HANDOFF.md</code>：Decode lease 已落地语义与 safety invariants。</li>
 <li><code>~/Code/tongyi/github/HANDOFF-gated-pd-ttft-admission.md</code>：gated-PD PREPARE／RESERVE／COMMIT。</li>
 <li><code>~/Downloads/client_token_scheduling_v0.2.md</code>：PP1／PP2、SLO slack、公平性、capacity lease。</li>
@@ -393,7 +393,7 @@ class NodeSnapshot:
 <p>View modes：</p>
 <ul>
 <li><code>ORACLE</code>：当前 simulator 真值。</li>
-<li><code>DELAYED(delta_ms)</code>：周期上报，模拟 Turbo／FlexLB state staleness。</li>
+<li><code>DELAYED(delta_ms)</code>：周期上报，模拟 Turbo／Centralized Master state staleness。</li>
 <li><code>LOSSY(p)</code>：部分 node 缺 cache stats，验证 fail-open。</li>
 </ul>
 <h3>2.3 五个基础接口</h3>
@@ -525,8 +525,8 @@ class Simulator(Protocol):
 </tr>
 <tr>
 <td>S5</td>
-<td><code>FlexLbTtftSelector</code></td>
-<td>FlexLB</td>
+<td><code>CentralizedMasterTtftSelector</code></td>
+<td>Centralized Master</td>
 <td><code>queue_ms + input_tokens - 0.7×hit_tokens</code>；top 30% similar band 内 LRU node</td>
 <td>cache＋load 统一是否优于硬 sticky</td>
 </tr>
@@ -535,7 +535,7 @@ class Simulator(Protocol):
 <td><code>CalibratedTtftSelector</code></td>
 <td>本设计 basic+</td>
 <td><code>queue_ms + prefill_ms(uncached_tokens, state)</code></td>
-<td>替掉 FlexLB 拍脑袋 0.7</td>
+<td>替掉 Centralized Master 拍脑袋 0.7</td>
 </tr>
 <tr>
 <td>S7</td>
@@ -816,7 +816,7 @@ completion_slack = completion_deadline - predicted_completion
 <li>P probe、D probe、KVS estimate；</li>
 <li>next attempt 的路由入口。</li>
 </ul>
-<p>Engine 适合做 token scheduling 和 local preemption；Turbo／FlexLB 适合选 instance；只有 client 能把“当前 D 不值得继续”转换成“带 checkpoint 的另一次 D attempt”，并保证用户 output 不重复。</p>
+<p>Engine 适合做 token scheduling 和 local preemption；Turbo／Centralized Master 适合选 instance；只有 client 能把“当前 D 不值得继续”转换成“带 checkpoint 的另一次 D attempt”，并保证用户 output 不重复。</p>
 <h3>7.2 不做“谁低优就杀谁”</h3>
 <p>每个 Decode checkpoint 比较两个 plan：</p>
 <pre><code class="language-text">Keep(r, d)
@@ -1007,7 +1007,7 @@ Preempt only if Move - Keep &gt; safety_margin
 <ol>
 <li>Random 把相同 prefix 打散，8 nodes／50k 总容量损失约 17pp。</li>
 <li>PrefixAnchor(2) 几乎恢复 token-weighted infinite ceiling <code>57.070%</code>，但负载很歪：8 nodes request max／mean=<code>3.55×</code>，input token max／mean=<code>2.98×</code>。</li>
-<li>这正是 FlexLB／S6 要回答的 tradeoff：不要只看 hit，也不要只看 balance。</li>
+<li>这正是 Centralized Master／S6 要回答的 tradeoff：不要只看 hit，也不要只看 balance。</li>
 <li><code>PrefixAnchor(1)</code> 受超热共同首块影响，8 nodes／50k 只有 43.73%；anchor choice 不能写死。</li>
 </ol>
 <p>最终实现必须用 versioned config 重跑，同时输出 block-ref 与 token-weighted 两张表；以上数字不作为正式结论。</p>
@@ -1144,7 +1144,7 @@ seed                 = 713..720
 </tr>
 <tr>
 <td>B2</td>
-<td>FlexLB</td>
+<td>Centralized Master</td>
 <td>PD</td>
 <td>no lease</td>
 </tr>
@@ -1221,7 +1221,7 @@ seed                 = 713..720
 <li><input checked="" disabled="" type="checkbox"> 接受 <code>CacheTopology × ExecutionProtocol</code>，同时加入 validity matrix 和三个显式 coupling。</li>
 <li><input checked="" disabled="" type="checkbox"> S3／S4 拆开；共享 <code>CapacityGate</code>／<code>BoundedFallback</code> helper。</li>
 <li><input checked="" disabled="" type="checkbox"> 接受严格 online 的 <code>AffinityKeyProxy</code>；加入 hot-block exclusion 和 family size cap。</li>
-<li><input checked="" disabled="" type="checkbox"> FlexLB v1 先严格复刻，再实现 calibrated v2。</li>
+<li><input checked="" disabled="" type="checkbox"> Centralized Master v1 先严格复刻，再实现 calibrated v2。</li>
 <li><input checked="" disabled="" type="checkbox"> Phase A 先固定 LRU 排 selector，再扫 Top-2 eviction。</li>
 <li><input checked="" disabled="" type="checkbox"> D1／D1.5 是 advanced implementation ceiling；D2 只做 gated spike，不直接实现 arbitrary abort。</li>
 <li><input checked="" disabled="" type="checkbox"> Phase C+ 主报 strict completed goodput，lenient／partial 单列；Phase A 不报 goodput。</li>
@@ -1268,7 +1268,7 @@ seed                 = 713..720
 <li><input checked="" disabled="" type="checkbox"> 共用 <code>BoundedFallback</code>：primary／secondary range＋LeastWork fail-open。</li>
 <li><input checked="" disabled="" type="checkbox"> S3 GBPrefixBucket：静态 prefix ownership 薄壳。</li>
 <li><input checked="" disabled="" type="checkbox"> S4 SessionAffinity：online linker＋hot-block exclusion＋family cap 薄壳。</li>
-<li><input checked="" disabled="" type="checkbox"> S5 FlexLB：公式 v1＋top30／similar band／last-selected fairness。</li>
+<li><input checked="" disabled="" type="checkbox"> S5 Centralized Master：公式 v1＋top30／similar band／last-selected fairness。</li>
 <li><input checked="" disabled="" type="checkbox"> S6 CalibratedTTFT：先用 normalized work model。</li>
 <li><input checked="" disabled="" type="checkbox"> E0 FIFO、E1 LRU、E2 SLRU、E3 SecondHitAdmission。</li>
 <li><input checked="" disabled="" type="checkbox"> 每次 selection 保留 component trace，可按 request sample debug。</li>
@@ -1354,7 +1354,7 @@ seed                 = 713..720
 <p>通过后才决定是否接 LLMClientV1 enforce／Decode D2。</p>
 <h3>M11｜Production implementation，另立 RFC／MR</h3>
 <ul>
-<li><input disabled="" type="checkbox"> selector 接入点单独拍板：Turbo／FlexLB master／LLMClientV1 SDK，不重复造全局 map。</li>
+<li><input disabled="" type="checkbox"> selector 接入点单独拍板：Turbo／centralized master／LLMClientV1 SDK，不重复造全局 map。</li>
 <li><input disabled="" type="checkbox"> Client 保留 request ledger／SLO／grant／continuation owner。</li>
 <li><input disabled="" type="checkbox"> <code>off｜shadow｜enforce</code>，默认 off。</li>
 <li><input disabled="" type="checkbox"> required mode 仅 test workspace，防 fallback 盖问题。</li>
@@ -1387,7 +1387,7 @@ seed                 = 713..720
 <td>增加 hot-block exclusion／family cap；主看 skew／staleness</td>
 </tr>
 <tr>
-<td>FlexLB</td>
+<td>Centralized Master</td>
 <td>先复刻 <code>0.7</code>，再 calibrated</td>
 <td>v1 是解释 diff 的锚点</td>
 </tr>

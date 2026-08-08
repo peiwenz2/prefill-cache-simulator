@@ -199,7 +199,7 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
         <tr><td>S0 / S1 / S2</td><td>Random / RoundRobin / LeastWork</td><td>抛硬币／轮流发／谁闲发谁</td><td>基线</td></tr>
         <tr><td>S3</td><td>GBPrefixBucket</td><td>按前缀桶粘节点，同前缀聚堆</td><td>Turbo CacheAwareScheduler（<code>CacheAwareScheduler.java:1196-1202</code> 四维容量门）</td></tr>
         <tr><td>S4</td><td>SessionAffinity</td><td>同 session 粘同节点：在线建链 + 热 block 排除 + family 上限</td><td>Session 亲和</td></tr>
-        <tr><td>S5 / S6</td><td>FlexLbTtft / CalibratedTtft</td><td>打分 <code>queue_ms + input_tokens − 0.7×hit_tokens</code>，top-30% 带内随机</td><td>RTP-LLM ShortestTTFTStrategy</td></tr>
+        <tr><td>S5 / S6</td><td>CentralizedMasterTtft / CalibratedTtft</td><td>打分 <code>queue_ms + input_tokens − 0.7×hit_tokens</code>，top-30% 带内随机</td><td>RTP-LLM ShortestTTFTStrategy</td></tr>
         <tr><td>S7</td><td>CacheSlo</td><td>缓存与 SLO 混合打分</td><td>混合</td></tr>
       </tbody>
     </table>
@@ -246,7 +246,7 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
 
     <h3>2.5 M11 RFC 已定的关键决策</h3>
     <ul class="plain">
-      <li><strong>attach 点</strong>：把带版本的打分函数交付给现有版图 owner——FlexLB master 是 push 型、Turbo CacheAwareScheduler 是 pull 型；<strong>不建第三张全局图</strong>（RFC §2）。</li>
+      <li><strong>attach 点</strong>：把带版本的打分函数交付给现有版图 owner——centralized master 是 push 型、Turbo CacheAwareScheduler 是 pull 型；<strong>不建第三张全局图</strong>（RFC §2）。</li>
       <li><strong>WHERE 与生命周期分离</strong>：selector 只回答 WHERE（<code>LegRoute { prefer_host, exclude_hosts, hint_input_tokens }</code>）；LLMClientV1 保有 logical_request_id、attempt 身份、重试预算、续段、OutputAuthority（epoch + output_seq 围栏）、durable output-ack ledger（RFC §3）。</li>
       <li><strong>四档 enforcement</strong>：off｜shadow｜enforce｜required；fail-open 五种原因计数：timeout／error／stale view／capability mismatch／planner unavailable（RFC §4–§5）。</li>
       <li><strong>能力握手</strong>：PREFIX_CACHE_QUERY、DECODE_LEASE_V1、R2_CHECKPOINT_STORE、COOPERATIVE_PREEMPT；<strong>未握手实例按零能力对待</strong>（RFC §6）。</li>
@@ -278,7 +278,7 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
         <tr><td>S0 Random</td><td>0.4430</td><td>—</td><td>—</td></tr>
         <tr><td>S3 GBPrefixBucket</td><td><strong>0.5401</strong></td><td>3103.48</td><td>1.822</td></tr>
         <tr><td>S4 SessionAffinity</td><td>0.5334</td><td><strong>3011.46</strong></td><td><strong>1.047</strong></td></tr>
-        <tr><td>S5 FlexLbTtft</td><td>0.5232</td><td>6589.08</td><td>—</td></tr>
+        <tr><td>S5 CentralizedMasterTtft</td><td>0.5232</td><td>6589.08</td><td>—</td></tr>
       </tbody>
     </table>
     <p class="smallnote">只说 diff 不下总评：S3 命中最高但偏斜大；S4 略低但均衡好；S5 排队恶化被 stop gate 淘汰。</p>
@@ -354,7 +354,7 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
       <tbody>
         <tr><td>M9 标定外插（trace 范围超出拟合网格 2.04×／2.23×）</td><td>PROVENANCE 已量化披露；M9-HW 扩网格</td><td>对超界请求单独标注置信度</td></tr>
         <tr><td>M10 tau-b 压力不足，翻转未被逼出</td><td>M10-HW 用真实压力 + 冻结 tau-b 对 G-Prod</td><td>提高 replay_speed 扫描到出现排队拐点</td></tr>
-        <tr><td>Turbo pull 型版图上 shadow 语义不明</td><td>G0 要求 Turbo owner 对 pull-shadow 签字</td><td>先只在 FlexLB push 路径做 R1</td></tr>
+        <tr><td>Turbo pull 型版图上 shadow 语义不明</td><td>G0 要求 Turbo owner 对 pull-shadow 签字</td><td>先只在 Centralized Master push 路径做 R1</td></tr>
         <tr><td>fail-open 掩盖 planner 故障</td><td>五种 FailOpenReason 分别计数、设告警（RFC §5）</td><td>required 模式仅限深度验证环境</td></tr>
         <tr><td>D2 抢占率超标</td><td>R4 独立门：<code>preemptions_per_completed_request ≤ 0.25</code> 硬上限（真实恢复语义）</td><td>永久停留在 D1.5</td></tr>
       </tbody>
@@ -403,7 +403,7 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
         <text x="30" y="146" font-size="12" font-weight="600" fill="#475569">线 B：生产接入</text>
         <rect class="node" x="150" y="124" width="140" height="48" rx="6" fill="#dbeafe" stroke="#1e40af" stroke-width="1.5" data-node="g-b0"/>
         <text x="220" y="144" text-anchor="middle" font-size="12.5" font-weight="600" pointer-events="none">G0 owner 签字</text>
-        <text x="220" y="161" text-anchor="middle" font-size="10.5" fill="#475569" pointer-events="none">FlexLB + Turbo</text>
+        <text x="220" y="161" text-anchor="middle" font-size="10.5" fill="#475569" pointer-events="none">Centralized Master + Turbo</text>
         <rect class="node" x="350" y="124" width="140" height="48" rx="6" fill="#dbeafe" stroke="#1e40af" stroke-width="1.5" data-node="g-r0"/>
         <text x="420" y="144" text-anchor="middle" font-size="12.5" font-weight="600" pointer-events="none">G1' R0 指标管线</text>
         <text x="420" y="161" text-anchor="middle" font-size="10.5" fill="#475569" pointer-events="none">enforcement=off</text>
@@ -426,7 +426,7 @@ dialog{border:1px solid var(--line2);border-radius:8px;padding:0;max-width:620px
     <table>
       <thead><tr><th>门</th><th>内容</th><th>进入条件</th><th>退出条件</th></tr></thead>
       <tbody>
-        <tr><td>G0</td><td>owner sign-off</td><td>RFC §2 attach 方案成文（已完成）</td><td>FlexLB／Turbo owner 签字；Turbo pull-shadow 语义确认</td></tr>
+        <tr><td>G0</td><td>owner sign-off</td><td>RFC §2 attach 方案成文（已完成）</td><td>Centralized Master／Turbo owner 签字；Turbo pull-shadow 语义确认</td></tr>
         <tr><td>G1 M9-HW</td><td>真实引擎标定扫描</td><td>拿到带 <code>MachineProvenance</code>（host_id／accelerator_model／engine_version／captured_at_utc）的 <code>EngineEndpoint</code></td><td>产出 HW_CALIBRATED 系数 + KVT 基准（M5 遗留 DEFERRED_PER_M5）</td></tr>
         <tr><td>G2</td><td>标定系数重跑 M4–M8</td><td>G1 完成</td><td>结论排序不变或差异有解释</td></tr>
         <tr><td>G3 M10-HW</td><td>冻结 tau-b 对 G-Prod</td><td>G2 完成</td><td>真实压力下 tau-b 达标</td></tr>
@@ -519,7 +519,7 @@ const NODE_DETAILS = {
   'g-hw1': { title: 'G1 M9-HW', body: '<p>在真实引擎上重跑标定扫描。阻塞项：需要携带真实 MachineProvenance（host_id／accelerator_model／engine_version／captured_at_utc）的 EngineEndpoint。</p><p>退出：HW_CALIBRATED 系数 + KVT 基准（DEFERRED_PER_M5）。</p>' },
   'g-hw2': { title: 'G2 标定后重跑', body: '<p>用硬件标定系数重跑 M4–M8 合成扫描，复核结论排序是否不变或差异可解释。</p>' },
   'g-hw3': { title: 'G3 M10-HW', body: '<p>冻结 KENDALL_TAU_B 统计量，对比 G-Prod。当前合成 tau_b=1.0 是弱证据（压力不足），必须在真实压力下重测。</p>' },
-  'g-b0': { title: 'G0 owner 签字', body: '<p>FlexLB（push 版图）与 Turbo（pull 版图）owner 对 RFC §2 attach 方式签字。</p><p>Turbo pull-shadow 语义（记录但不执行）需 owner 确认。</p>' },
+  'g-b0': { title: 'G0 owner 签字', body: '<p>Centralized Master（push 版图）与 Turbo（pull 版图）owner 对 RFC §2 attach 方式签字。</p><p>Turbo pull-shadow 语义（记录但不执行）需 owner 确认。</p>' },
   'g-r0': { title: "G1' R0 指标管线", body: '<p>enforcement=off，只建 RFC §8 观测指标。CPU 机器即可完成 plumbing。</p>' },
   'g-r1': { title: 'R1 shadow 3 天', body: '<p>影子决策与线上决策 diff 报告；影子从不 enforce（模拟域由 ShadowEnforcementError 结构性保证同款语义）。</p>' },
   'g-merge': { title: '汇合后阶梯', body: '<p>G4 R2 单 deployment canary → G5 解决 Q6（durable ack 写序）→ G6 解决 Q5（D2 re-registration）→ G7 R4 D2 评估：preemptions_per_completed_request ≤ 0.25 硬上限（真实恢复语义，非上界模型）。</p>' }

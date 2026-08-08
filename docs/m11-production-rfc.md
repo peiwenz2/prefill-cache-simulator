@@ -2,7 +2,7 @@
 
 作者：张珮文
 状态：RFC，未实现。本仓库只交付 RFC 与 chain mock，不含 production MR。
-适用范围：DashScope PD 链路（Turbo／FlexLB master／LLMClientV1）。
+适用范围：DashScope PD 链路（Turbo／centralized master／LLMClientV1）。
 
 ## 0. 这份 RFC 决定什么
 
@@ -20,10 +20,10 @@
 |---|---|---|
 | Turbo `CacheAwareScheduler` | **pull-based**：engine 按 cache bucket range 主动拉请求；Turbo 侧已持有 bucket→engine 映射与四维容量闸 | 已经是一份 map owner。没有外部 push 的接入位 |
 | Turbo `StickySessionScheduler` | primary／alternative bucket，无 hard fallback | 亲和性已在同一份 map 内表达 |
-| FlexLB master `ShortestTTFTStrategy` | **push-based**：`TTFT = queueTime + tokens − 0.7×hitCacheTokens`，top-30% 带内 + last-selected CAS 公平 | 已经是一份 map owner，且已经用到 cached tokens |
+| centralized master `ShortestTTFTStrategy` | **push-based**：`TTFT = queueTime + tokens − 0.7×hitCacheTokens`，top-30% 带内 + last-selected CAS 公平 | 已经是一份 map owner，且已经用到 cached tokens |
 | LLMClientV1（Rust，dashserving） | 已上线 decode lease v1：`resolve_leg_route(ctx, snap) -> LegRoute`、`should_resched(ctx, snap, signals) -> Decision` 两个单点 seam | 已持有 logical request identity、attempt id、retry／resched budget、continuation |
 
-DESIGN-v3 §7.1 已给出分工判断：engine 适合做 token scheduling 与 local preemption；Turbo／FlexLB 适合选 instance；只有 client 能把"当前 D 不值得继续"翻译成"带 checkpoint 的另一次 D attempt"，并保证用户 output 不重复。本 RFC 把这句话落成接口。
+DESIGN-v3 §7.1 已给出分工判断：engine 适合做 token scheduling 与 local preemption；Turbo／Centralized Master 适合选 instance；只有 client 能把"当前 D 不值得继续"翻译成"带 checkpoint 的另一次 D attempt"，并保证用户 output 不重复。本 RFC 把这句话落成接口。
 
 ## 2. 决策一：selector 接入点
 
@@ -31,13 +31,13 @@ DESIGN-v3 §7.1 已给出分工判断：engine 适合做 token scheduling 与 lo
 
 | 部署形态 | selector 归属（WHERE） | M11 交付物 |
 |---|---|---|
-| FlexLB 在链路上 | FlexLB master | 替换 `ShortestTTFTStrategy` 的 score 项，新增 `selector_score_version` |
+| Centralized Master 在链路上 | centralized master | 替换 `ShortestTTFTStrategy` 的 score 项，新增 `selector_score_version` |
 | Turbo batching 为入口 | Turbo `CacheAwareScheduler` | 调整 bucket 排序权重，新增 `selector_score_version` |
 | 两者都不在（直连） | 不接入 | 保持现状，`off` |
 
 理由：
 
-- **避免双份真相。** FlexLB master 与 Turbo 各自已经是权威 map。再造第三份 map 会引入 view skew，而 stale view 恰好是本 RFC 要防的故障之一（见 §7）。
+- **避免双份真相。** centralized master 与 Turbo 各自已经是权威 map。再造第三份 map 会引入 view skew，而 stale view 恰好是本 RFC 要防的故障之一（见 §7）。
 - **selector 是无状态打分。** 它只需要 `(candidate, snapshot) -> score`，可以作为库嵌入现有 owner，不需要独立生命周期。
 - **client 不做 placement。** client 只表达 preference，见 §3。
 
@@ -61,7 +61,7 @@ owner 归属在 chain mock 中是可执行行为，不只是文档字段。诚�
 
 | 关注点 | Owner | 说明 |
 |---|---|---|
-| WHERE：候选打分、实例选择 | FlexLB master／Turbo | 已有 map owner。selector 只贡献 score |
+| WHERE：候选打分、实例选择 | centralized master／Turbo | 已有 map owner。selector 只贡献 score |
 | logical request identity | LLMClientV1 | `logical_request_id` 跨 attempt 稳定 |
 | attempt identity | LLMClientV1 | 每次新 leg 一个 `attempt_index` |
 | retry／resched budget | LLMClientV1 | lease expiry 不消耗 retry budget；budget 耗尽后**拒绝一切新 attempt**，唯一合法出口是一个 `ERROR` terminal |
@@ -234,7 +234,7 @@ D2（cooperative preemption）单独闸，全部满足才评估：
 | # | 问题 | 现状 | 默认 |
 |---|---|---|---|
 | Q1 | SLO class → deadline 表归谁维护 | `client_token_scheduling_v0.2` §11 标为未决 | 暂定配置服务（uniconfig）下发，client 只读。**需产品与 SRE 确认** |
-| Q2 | Turbo 与 FlexLB 同时在链路上时谁是 owner | 未见共存部署 | 就近原则：谁直接面对 engine 谁是 owner |
+| Q2 | Turbo 与 Centralized Master 同时在链路上时谁是 owner | 未见共存部署 | 就近原则：谁直接面对 engine 谁是 owner |
 | Q3 | `selector_score_version` 跨 deployment 不一致时如何比对 | 未定 | canary 期间强制同版本；不同版本不做横向比较 |
 | Q4 | R2 checkpoint store 的容量与淘汰策略 | 未定 | D2 未开闸前不阻塞 |
 | Q5 | client 主导 epoch 前进（lease expiry／重启）后，planner／controller 如何重新注册该请求 | mock 无 re-auth 通道，此后 D2 对该请求**永久 fail-open** 到 `REPORT_CHECKPOINT` | fail-open 是安全侧默认；re-registration 协议属于 D2 production 设计，未开闸前不阻塞 |

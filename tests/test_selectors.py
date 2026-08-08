@@ -10,7 +10,7 @@ from prefill_cache_sim.domain import (
 from prefill_cache_sim.identity import NamedSeedManager
 from prefill_cache_sim.selectors import (
     CalibratedTtftSelector,
-    FlexLbTtftSelector,
+    CentralizedMasterTtftSelector,
     LeastWorkSelector,
     RandomSelector,
     RoundRobinSelector,
@@ -130,12 +130,14 @@ def test_session_selector_keeps_linked_family_on_same_node() -> None:
     assert first.node_id == second.node_id
 
 
-def test_flexlb_and_calibrated_prefer_warm_node_when_load_is_similar() -> None:
+def test_centralized_master_and_calibrated_prefer_warm_node_when_load_is_similar() -> (
+    None
+):
     req = request([1, 2])
     cluster = view([10, 10], {"p0": (0, 0), "p1": (2, 1024)})
-    flex = FlexLbTtftSelector().select(req, cluster)
+    centralized = CentralizedMasterTtftSelector().select(req, cluster)
     calibrated = CalibratedTtftSelector().select(req, cluster)
-    assert flex.node_id == "p1"
+    assert centralized.node_id == "p1"
     assert calibrated.node_id == "p1"
     assert calibrated.components["uncached_tokens"] == 0
 
