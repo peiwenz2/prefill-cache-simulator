@@ -11,7 +11,7 @@
   "decode_node_count": 8,
   "gpu_capacity_claim": false,
   "observation_end_work": 6000000.0,
-  "schema_version": "m12-sizing-v2",
+  "schema_version": "m12-sizing-v2.1",
   "service_costs": {
     "decode_batch_max_saving": 0.25,
     "decode_batch_saturation_sequences": 48,
