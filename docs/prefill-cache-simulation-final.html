@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prefill Cache Simulation：从命中率到资源效率</title>
+<style>
+:root{--ink:#172033;--muted:#64748b;--line:#d9deea;--paper:#fff;--wash:#f5f6fb;--accent:#4338ca;--soft:#eef2ff;--ok:#15803d;--oksoft:#edf8f0;--warn:#b45309;--warnsoft:#fff7ed;--bad:#b91c1c;--badsoft:#fef2f2}
+*{box-sizing:border-box}body{margin:0;background:#e9ecf3;color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}main{width:1120px;margin:24px auto;background:var(--paper);box-shadow:0 14px 40px #1720331a}section{padding:46px 56px;border-bottom:1px solid var(--line);break-inside:avoid}h1{font-size:38px;line-height:1.2;margin:8px 0 18px}h2{font-size:27px;margin:0 0 20px}h3{font-size:19px;margin:24px 0 10px}.eyebrow,.label{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}.lede{font-size:20px;line-height:1.65}.grid2,.grid3,.grid4{display:grid;gap:14px}.grid2{grid-template-columns:repeat(2,1fr)}.grid3{grid-template-columns:repeat(3,1fr)}.grid4{grid-template-columns:repeat(4,1fr)}.card,.call{border:1px solid var(--line);border-radius:14px;padding:17px;background:#fff}.call{border-left:5px solid var(--accent);background:var(--soft)}.ok{border-left-color:var(--ok);background:var(--oksoft)}.warn{border-left-color:var(--warn);background:var(--warnsoft)}.bad{border-left-color:var(--bad);background:var(--badsoft)}.metric{font-size:28px;font-weight:800;color:var(--accent);margin:4px 0}.metric.green{color:var(--ok)}table{width:100%;border-collapse:collapse;margin:12px 0 18px}th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}th{background:var(--wash)}code,pre{font-family:"SFMono-Regular",Consolas,monospace}code{background:#f2f4f9;border-radius:5px;padding:2px 5px}pre{white-space:pre-wrap;background:#f2f4f9;color:#263147;border:1px solid var(--line);border-radius:12px;padding:15px;line-height:1.65}ul,ol{margin:7px 0;padding-left:21px}li+li{margin-top:4px}.fine{font-size:12px;color:var(--muted)}
+@page{size:A4 landscape;margin:9mm}@media print{body{background:#fff;font-size:10px}main{width:auto;margin:0;box-shadow:none}section{padding:8mm 10mm;min-height:190mm;page-break-after:always}h1{font-size:28px}h2{font-size:21px}h3{font-size:15px}.lede{font-size:14px}.metric{font-size:20px}table{font-size:9px}.fine{font-size:8px}}
+</style></head><body><main>
+<section>
+<div class="eyebrow">Final report · 2026-08-09</div>
+<h1>Prefill Cache Simulation<br>从“命中多少”到“最少需要多少 P”</h1>
+<p class="lede">本报告回答两个问题：没有 Shared KVS 时，怎样选 Prefill node 才能保住 local prefix cache；有 Shared KVS 后，怎样在 deadline、fairness、queue 和 transfer budget 内，用最少的 P 完成同一份 trace。</p>
+<div class="grid4">
+<div class="card"><div class="label">Trace ceiling</div><div class="metric">57.07%</div><div>Infinite capacity、no expiry、strict prefix。</div></div>
+<div class="card"><div class="label">Local-only best</div><div class="metric">54.01%</div><div>4 P、12,500 blocks/P、LRU、100ms delayed view。</div></div>
+<div class="card"><div class="label">Shared @ P=2</div><div class="metric green">＋165</div><div>STRICT requests 按时数：3,701→3,866。</div></div>
+<div class="card"><div class="label">边界</div><div class="metric">≠ MFU</div><div>Normalized simulation；真实秒数等待硬件标定。</div></div>
+</div>
+<div class="call ok"><div class="label">一句话结论</div>Local-only 世界里，stable prefix owner 最值钱；Shared KVS 世界里，最值钱的是把 local hit、remote fetch 和 queue 放进同一张 SLO 成本账，再据此做 resource sizing。</div>
+<p class="fine">署名：张珮文。每个数字会标明 trace 观测、simulation 输出或 synthetic assumption。</p>
+</section>
+
+<section>
+<div class="eyebrow">01 · Data contract</div><h2>数据给了 block hash，也给了 input token 数</h2>
+<table><thead><tr><th>Item</th><th>数字</th><th>怎么理解</th><th>不能反推什么</th></tr></thead><tbody>
+<tr><td>Requests</td><td>23,608；0～3,600,000ms；1,180 个 unique timestamps</td><td>按 timestamp 回放；同 timestamp 会形成 burst。</td><td>不是平滑 QPS。</td></tr>
+<tr><td>Input</td><td>202,791,701 tokens；mean 8,589.96；median 6,345；p95 26,078.55</td><td>request 级 input token 总数是 trace truth。</td><td>看不到 token 文本。</td></tr>
+<tr><td>Output</td><td>4,299,817 tokens；mean 182.13；median 30；p95 600</td><td>用于 Decode work。</td><td>没有逐 token 时间。</td></tr>
+<tr><td>Blocks</td><td>409,356 references；183,166 unique</td><td>一个 full hash block 代表 512 tokens；23,581 requests 有 partial tail。</td><td>hash 不是 token，不能做 block 内匹配。</td></tr>
+<tr><td>Session</td><td>无 session_id</td><td>只能用共享 prefix 做 online family proxy。</td><td>不能声称恢复真实会话。</td></tr>
+</tbody></table>
+<div class="grid2">
+<div class="call"><div class="label">Token-weighted hit</div><ul><li>full block 命中计 512 tokens。</li><li>最后 partial block 用 input_tokens 还原实际 token 数。</li><li>只统计从第一个 block 开始连续命中的 prefix。</li></ul></div>
+<div class="call warn"><div class="label">57.07% 的前提</div><ul><li>容量无限、永不过期。</li><li>所有历史 request 对当前 request 可见。</li><li>不计 local 分片、transfer、queue、故障。</li></ul></div>
+</div>
+<pre>token_weighted_hit = 连续命中的实际 prefix tokens / 全部 input tokens
+                   = 115,733,271 / 202,791,701
+                   = 57.0700%</pre>
+</section>
+
+<section>
+<div class="eyebrow">02 · Local-only world</div><h2>没有 Shared KVS：selector 要把复用流量聚回同一台 P</h2>
+<table><thead><tr><th>策略</th><th>规则</th><th>Token hit</th><th>收益</th><th>瓶颈</th></tr></thead><tbody>
+<tr><td>Random</td><td>alive P 中均匀随机。</td><td>44.30%</td><td>无偏 baseline。</td><td>prefix 被打散。</td></tr>
+<tr><td>Round Robin</td><td>按 request 次序轮转。</td><td>44.25%</td><td>request count 均衡。</td><td>不理解 token work。</td></tr>
+<tr><td>Least Work</td><td>选 running＋queued work 最少的 P。</td><td>43.67%</td><td>负载感知。</td><td>进一步打散 locality。</td></tr>
+<tr><td>Prefix owner＋fallback</td><td>前 2 个 block 形成 stable owner；owner 过载时只看 2 个 deterministic fallback。</td><td><strong>54.01%</strong></td><td>重复 prefix 回到同一 owner。</td><td>热 prefix 单点；k=2 是 trace-specific sweep。</td></tr>
+<tr><td>Session proxy</td><td>最长共享 prefix 形成 family，再 sticky 到 owner。</td><td>53.34%（proxy）</td><td>接近连续上下文。</td><td>无真实 session_id。</td></tr>
+<tr><td>中心化 master</td><td>综合 queue、input、estimated local hit 排序。</td><td>53.01% fresh；52.32% delayed</td><td>fresh view 下兼顾 hit 与 queue。</td><td>stale-view herding。</td></tr>
+</tbody></table>
+<div class="call"><div class="label">Prefix owner 的四步</div><ol><li>取 request 前两个 block hash，k=2 不是“相邻两台 node”。</li><li>SHA-256(key) % N，N 是当前 alive P 数，得到 stable owner。</li><li>用 normalized queued token-work 判断 owner 是否超过 1.25× cluster mean。</li><li>过载时看 hash ring 上后续两个候选，选其中 least-work；不是按命中率 top2。</li></ol></div>
+<div class="call warn"><div class="label">100ms 的准确含义</div>不是 selector 运行了 100ms，而是 master 读取的 node snapshot 已经老了 100ms。来源可包括 heartbeat 周期、网络、聚合和排队。所有依赖 snapshot 的策略使用同一 causal view；stable owner 映射本身不依赖 fresh ranking。</div>
+</section>
+
+<section>
+<div class="eyebrow">03 · Shared KVS world</div><h2>Global 可见不等于每次都 remote fetch</h2>
+<div class="grid3"><div class="card"><div class="label">Local hit</div><div class="metric green">0 transfer</div><div>目标 P 已有 KV。</div></div><div class="card"><div class="label">Remote hit</div><div class="metric">0.01 work/token</div><div>Shared KVS 有 KV，但目标 P 没有。</div></div><div class="card"><div class="label">Miss</div><div class="metric">0.06 work/token</div><div>P 必须重新计算。</div></div></div>
+<h3>成本全部是 round-number assumption</h3>
+<table><thead><tr><th>量</th><th>值</th><th>大白话</th><th>性质</th></tr></thead><tbody>
+<tr><td>Decode</td><td>1.00 work/token</td><td>定义 Decode 1 token 的计算成本为 1 work。</td><td>单位定义。</td></tr>
+<tr><td>Prefill miss</td><td>0.06 work/token</td><td>假设 Prefill 1 input token 只需 Decode token 的 6%。</td><td>Synthetic assumption。</td></tr>
+<tr><td>Remote KV</td><td>0.01 work/token</td><td>假设搬 1 token 的 KV 需 Decode token 的 1%。</td><td>Synthetic assumption。</td></tr>
+<tr><td>KV traffic</td><td>65,536 bytes/token</td><td>只做流量记账；512-token full block＝32MiB。</td><td>模型尺寸 assumption，不是 trace 字段。</td></tr>
+</tbody></table>
+<pre>uncached_tokens = input_tokens − local_hit_tokens − remote_hit_tokens
+P_gpu_work      = uncached_tokens × 0.06
+KVS_work        = remote_hit_tokens × 0.01
+D_gpu_work      = output_tokens × 1.00
+KV_bytes        = remote_hit_tokens × 65,536</pre>
+<div class="call"><div class="label">Priced-spill selector</div><ol><li>每台 eligible P 先算 local prefix。</li><li>Shared 开启时再算可以 remote fetch 的 prefix。</li><li>score＝queue＋recompute work＋remote transfer work。</li><li>预计超过该 request SLO slack 的 P 先淘汰。</li><li>剩余候选取 score 最小；相近时选最久未被选的 P，降低 herding。</li></ol></div>
+<div class="call ok"><div class="label">为什么有 KVS 也不一定取</div>ZERO_TRANSFER_PRICE_CONTROL 把 remote price 设成 0 后，P8 remote tokens 从正常 Shared 的约 13M 增至约 33M。可见“KVS 中存在”只是可选项；是否取用由 transfer price 与 recompute/queue 的比较决定。</div>
+</section>
+
+<section>
+<div class="eyebrow">04 · Replay contract</div><h2>代码简单回放了什么</h2>
+<table><thead><tr><th>阶段</th><th>输入</th><th>kernel 动作</th><th>证据</th></tr></thead><tbody>
+<tr><td>Arrival</td><td>timestamp、tokens、hash_ids</td><td>按时间发出 23,608 logical requests；same-time priority 固定。</td><td>offered/completed ledger。</td></tr>
+<tr><td>Placement</td><td>causal cache snapshot、P queue、KVS price</td><td>selector 返回唯一 P/D；不能读取未来。</td><td>decision fingerprint、local/remote/miss tokens。</td></tr>
+<tr><td>Prefill</td><td>miss＋remote tokens</td><td>P 串行执行 recompute 与 modeled transfer，记录 READY/START/FINISH。</td><td>actual queue wait、P modeled utilization。</td></tr>
+<tr><td>Decode</td><td>true output tokens</td><td>D pool 执行 output work；resource sizing 不启用 abort/retry。</td><td>D modeled utilization、completion。</td></tr>
+<tr><td>Cache</td><td>完成 request 的 prefix keys</td><td>本实验 capacity 大于 unique keys：admit all、no eviction。</td><td>结束时每个 P 的 alive blocks。</td></tr>
+<tr><td>Gate</td><td>deadline、fairness、queue、KVS budget</td><td>全部门槛通过才认为该 P 数可行。</td><td>minimum feasible P 与 P−1 失败证据。</td></tr>
+</tbody></table>
+<div class="grid2">
+<div class="call warn"><div class="label">两套实验不能混</div>54.01% local-only 实验：4 P、12,500 blocks/P、LRU、100ms delayed view。Resource-sizing 实验：P=1…8、no eviction、normalized work clock。数字可并列讲，但不能直接比较高低。</div>
+<div class="call warn"><div class="label">为什么不写 1s／1.5s／2s</div>deadline_ms＝deadline_work ÷ service_rate_work_per_ms。没有目标 GPU 的实测 service rate，就只能报告 deadline multiplier。写秒数会是假精度。</div>
+</div>
+</section>
+
+<section>
+<div class="eyebrow">05 · Frozen gates</div><h2>“SLO”是每条 request 的 deadline；“80%”是按时比例</h2>
+<table><thead><tr><th>Gate</th><th>Baseline</th><th>Strict sensitivity</th><th>说明</th></tr></thead><tbody>
+<tr><td>Tier deadline</td><td colspan="2">STRICT 5,000；STANDARD 20,000；RELAXED 100,000 work-time</td><td>不是秒。</td></tr>
+<tr><td>Completion</td><td>100%</td><td>100%</td><td>所有 offered request 最终完成。</td></tr>
+<tr><td>Minimum-tier attainment</td><td>≥80%</td><td>≥95%</td><td>三个 tier 分别算按时率，取最差的一个。</td></tr>
+<tr><td>Jain fairness</td><td>≥0.90</td><td>≥0.90</td><td>不同 synthetic tenant 的服务不能差太远。</td></tr>
+<tr><td>P queue p95</td><td>≤20,000 work</td><td>≤20,000 work</td><td>这是 backlog gate，不是 ms。</td></tr>
+<tr><td>KVS bytes/work</td><td>≤1,000,000</td><td>≤1,000,000</td><td>这是 modeled transfer budget，不是真实链路 GB/s。</td></tr>
+</tbody></table>
+<table><thead><tr><th>门槛</th><th>Local-only N*</th><th>Shared KVS N*</th><th>P−1 为什么失败</th></tr></thead><tbody>
+<tr><td>最差 tier ≥80%</td><td><strong>3</strong></td><td><strong>2</strong></td><td>Local P2：STRICT 3,701/4,780＝77.43%＜80%；Shared P2＝3,866/4,780＝80.88%。</td></tr>
+<tr><td>最差 tier ≥95%</td><td><strong>4</strong></td><td><strong>4</strong></td><td>P3：Local 4,504/4,780＝94.23%；Shared 4,485/4,780＝93.83%，都未过 95%。</td></tr>
+</tbody></table>
+<div class="call ok"><div class="label">可量化结论</div>在 baseline 80% gate 下，Shared KVS 把最小 P 从 3 台降到 2 台，减少 1/3；gate 收紧到 95% 后，两种 topology 都要 4 台，省节点收益消失。</div>
+</section>
+
+<section>
+<div class="eyebrow">06 · Full v2.2 result</div><h2>Deadline 松紧、queue、utilization 和 alive blocks</h2>
+<div class="call"><div class="label">Deadline sensitivity 的准确语义</div>只把三个 tier deadline 同比乘 0.5×～2.0×，routing、执行顺序、service cost、queue gate 和 KVS gate 全部冻结。它回答“同一批执行结果换一条 deadline 线会怎样”，不是 policy-aware reroute。</div>
+<table><thead><tr><th>Deadline</th><th>Local N*</th><th>Shared N*</th><th>结论</th></tr></thead><tbody>
+<tr><td>0.50×</td><td data-slot="local-050">TBD</td><td data-slot="shared-050">TBD</td><td data-slot="note-050">TBD</td></tr>
+<tr><td>0.75×</td><td data-slot="local-075">TBD</td><td data-slot="shared-075">TBD</td><td data-slot="note-075">TBD</td></tr>
+<tr><td>1.00×</td><td data-slot="local-100">TBD</td><td data-slot="shared-100">TBD</td><td data-slot="note-100">TBD</td></tr>
+<tr><td>1.25×</td><td data-slot="local-125">TBD</td><td data-slot="shared-125">TBD</td><td data-slot="note-125">TBD</td></tr>
+<tr><td>1.50×</td><td data-slot="local-150">TBD</td><td data-slot="shared-150">TBD</td><td data-slot="note-150">TBD</td></tr>
+<tr><td>2.00×</td><td data-slot="local-200">TBD</td><td data-slot="shared-200">TBD</td><td data-slot="note-200">TBD</td></tr>
+</tbody></table>
+<h3>同样 P 的 operational head-to-head</h3>
+<table><thead><tr><th>Case</th><th>Token hit</th><th>Actual P queue wait p95</th><th>P/D modeled utilization</th><th>Final alive blocks/P</th></tr></thead><tbody>
+<tr><td>Local P2</td><td data-slot="lp2-hit">TBD</td><td data-slot="lp2-q">TBD</td><td data-slot="lp2-u">TBD</td><td data-slot="lp2-b">TBD</td></tr>
+<tr><td>Shared P2</td><td data-slot="sp2-hit">TBD</td><td data-slot="sp2-q">TBD</td><td data-slot="sp2-u">TBD</td><td data-slot="sp2-b">TBD</td></tr>
+<tr><td>Local P4</td><td data-slot="lp4-hit">TBD</td><td data-slot="lp4-q">TBD</td><td data-slot="lp4-u">TBD</td><td data-slot="lp4-b">TBD</td></tr>
+<tr><td>Shared P4</td><td data-slot="sp4-hit">TBD</td><td data-slot="sp4-q">TBD</td><td data-slot="sp4-u">TBD</td><td data-slot="sp4-b">TBD</td></tr>
+</tbody></table>
+<div class="call bad"><div class="label">Publication gate</div>本页 TBD 必须由 v2.2 MANIFEST 内的 cells.csv 与 deadline-frontier.csv 填入并复算，不能凭代码存在就写数。</div>
+</section>
+
+<section>
+<div class="eyebrow">07 · Decision</div><h2>最值钱的不是继续追 3pp hit，而是 cache-aware resource substitution</h2>
+<div class="grid2">
+<div class="card"><div class="label">可以落地</div><ul><li>Local-only：stable prefix owner＋bounded load fallback。</li><li>Shared：priced spill，remote 只有比 recompute/queue 更便宜时才取。</li><li>Autoscaling：按最差 tier attainment＋queue＋fairness 选最小 P。</li><li>Shadow 指标：local/remote/miss、snapshot age、actual wait、transfer bytes。</li></ul></div>
+<div class="card"><div class="label">仍需硬件验证</div><ul><li>work-time 到 ms 的标定。</li><li>KV bytes/token 与具体模型、dtype、TP 的关系。</li><li>真实 KVS bandwidth/contention。</li><li>真实 GPU MFU；当前只有 modeled issued-work utilization。</li><li>capacity/TTL/eviction 下的 alive block 曲线。</li></ul></div>
+</div>
+<div class="call ok"><div class="label">最大价值</div><ul><li>Local-only 54.01% 已接近 57.07% trace ceiling，继续追 hit 的空间有限且容易制造 hotspot。</li><li>Shared KVS 把 cache reuse 变成可定价的资源替代：少算多少 Prefill、搬多少 KV、少用几台 P、最差 tier 是否仍按时。</li><li>Shared 不是无条件 winner：旧 floor sensitivity 在 0.94 和 0.96 出现反转，说明 transfer/routing 也会伤害严格 SLO。</li></ul></div>
+<div class="call warn"><div class="label">Decode lease</div>它应作为 overload protection 单独验证。已有 sensitivity 曾出现 hit 76.11%，但 attempts 41,403、retries 17,795、gated 14,881，strict output goodput 下降；retry 制造的额外 hit 不是免费收益。</div>
+<p class="fine">Evidence root：results/m12-sizing-v1.2；final publication 必须 pin git SHA、schema、MANIFEST SHA-256。</p>
+</section>
+</main></body></html>
