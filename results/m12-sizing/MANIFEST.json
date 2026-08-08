@@ -1,0 +1,9 @@
+{
+  "files": {
+    "cells.csv": "7502ce61659bf471ef28c05c51d79e58cbf0ce1185d466f0403011d1365157d3",
+    "contract.json": "519c48110e61c08f3f10114585a3af0a85de6f52d7f771e264a8c36c14e75a41",
+    "provenance.json": "17bdc02f676b21b97fee5c5b9a17bade61614d5f1f5121f3d8e1f4571470e74e",
+    "verdict.json": "76b25fd1c339c0da866e8b1f64126143efe62defa5ac745ff572233213d39f54"
+  },
+  "schema_version": "m12-sizing-manifest-v1"
+}

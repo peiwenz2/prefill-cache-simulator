@@ -509,7 +509,33 @@ PricedSpill 对 Baseline 只有＋0.266pp hit、＋0.0148% strict output、－0.
 
 最终 artifact 包含 45 primary、9 sensitivity、0 failure、45 constraints、45 explanation 和 45 visibility rows；16 个 MANIFEST hash 全部匹配。修复前 base 有 53 个 cell；新代码重跑缺失的 Decode Causal 与 No-Gate 对照，最终保留 52 个旧代码 cell。4 个 retained samples 通过 row 与 decision fingerprint invariance；混合 provenance 与 recompute scope 均写入 evidence。`decision_points_moved=false` 是探针方法属性，表示不移动原定决策时点；`decision_sequence_unchanged=false` 是 cell 测量结果，表示延迟视图改变了实际选择，两者不矛盾。空的 `crossovers.csv` 表示没有 winner 切换，不是漏写。
 
-### 5.2 Kill／narrow criteria
+### 5.2 Resource sizing insight：有 shared KVS 后，问题从 hit 变成最少需要几个 P
+
+这一步回答原题可选扩展背后的系统问题：request timestamp 已经固定时，selector 不应只追求 cache hit，而应在 completion、SLO、公平性和 queue 都过线的前提下，寻找最小的 Prefill node 数量 `N*`。
+
+实验枚举 P=1～8，不做二分搜索；每个 P 都重放 23,608 个原始 timestamp 请求。D 固定为 8 个 node，单 P 服务能力固定；cache 容量设为可容纳 trace 全部 unique block，用于隔离“资源数量／KVS topology”的影响，因此这不是 eviction benchmark。三种 topology 分别为：`LOCAL_ONLY`、付出 transfer cost 的 `SHARED_KVS`，以及 transfer cost=0 的不可部署 `IDEAL_GLOBAL_KVS_CONTROL`。最后一个只用于标理论下界。
+
+| Gate | 普通门槛 | 严格 sensitivity | 白话含义 |
+|---|---:|---:|---|
+| Completion | 100% | 100% | 所有 request 最终完成 |
+| Minimum tier SLO attainment | ≥0.80 | ≥0.95 | 最差服务等级也必须过线 |
+| Jain fairness | ≥0.90 | ≥0.90 | 不能只让一部分 tenant 快 |
+| P queue p95 | ≤20,000 normalized work | 同左 | 队列不能无限堆积；不是毫秒 |
+| KVS bytes／work | ≤1,000,000 | 同左 | shared KVS 搬运量不能越界 |
+
+| Topology | 普通门槛 `N*` | 严格门槛 `N*` | 相对 local 的资源变化 |
+|---|---:|---:|---:|
+| Ideal global KVS control | 2 | 4 | 不可部署的零成本下界 |
+| Local-only cache | 3 | 7 | baseline |
+| Shared KVS，计入 transfer cost | **2** | **4** | 少 1／3 个 P，即 **33.3%／42.9%** |
+
+普通门槛下，local P=2 只因 minimum-tier=0.7596＜0.80 失败；shared P=2 达到 0.8508。严格门槛下，local P=6 为 0.9431＜0.95，shared P=4 为 0.9611。两档真正 binding 的都是最差 tier SLO，不是平均 utilization，也不是 KVS bandwidth。每个最小值都带 P−1 failure certificate；“winner”只在这套 normalized contract 内成立，不等于真实 GPU 数量或 production QPS。
+
+工程 insight 是：有 shared KVS 时，cache locality 不再是唯一目标；selector 应最小化 `required P`，同时约束 queue、最差 tier、fairness 和 KVS cost。当前结果支持继续做 hardware calibration，但不能直接做采购或容量承诺，因为服务时间、KVT bandwidth、TTFT／TPOT 仍是 normalized model，tenant／tier 也是 deterministic synthetic overlay。
+
+代码与证据：`src/prefill_cache_sim/m12_sizing.py`、`scripts/run_m12_sizing.py`、`results/m12-sizing/{contract,cells,verdict,provenance,MANIFEST}`。
+
+### 5.3 Kill／narrow criteria
 
 1. **WHERE line kill**：R1 若显示 production baseline 距可用 locality ceiling 小于 2 pp，且 load skew 没有可改善空间，关闭 selector enforcement 线；保留 lifecycle RFC。
 2. **S4 kill**：拿不到 privacy-safe real session key，S4 降为 research result；不把 prefix-family proxy 上线。
@@ -529,4 +555,5 @@ PricedSpill 对 Baseline 只有＋0.266pp hit、＋0.0148% strict output、－0.
 | Cooperative preemption | `src/prefill_cache_sim/preemption.py:95-229` |
 | M4 selector results | `results/m4/summary.json` |
 | M5–M10 artifacts | `results/m5/`～`results/m10-synthetic/` |
+| M12 resource sizing | `results/m12-sizing/` |
 | 生产接入边界 | `docs/m11-production-rfc.md` |

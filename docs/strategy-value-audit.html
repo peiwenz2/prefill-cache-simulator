@@ -292,7 +292,7 @@
           lifecycle。每个策略都回答：代码在哪里、决策怎么走、收益为何出现、在哪些条件下会失败。
         </p>
         <div class="evidence">
-          数据与代码证据：prefill-cache-sim@4a00f10 ｜ 报告修订：2026-08-08 ｜ M12 final grid
+          数据与代码证据：prefill-cache-sim@ca9affd ｜ 报告修订：2026-08-08 ｜ M12 final grid＋resource sizing
           54／54 cells 完成，0 failure；MANIFEST SHA-256：89d4fb8d26a400d03a33538f2d889d2a3feb3bdf963ea219663d6e2004a69140
         </div>
       </div>
@@ -2249,7 +2249,43 @@ if move_score - keep_score &gt; safety_margin: abort_self
           </table>
           <p class="fine">空的 <code>crossovers.csv</code> 表示 15 个 regime×scale group 中没有 winner 切换，不是漏写；<code>retry_pressure_covered=true</code> 只由 MIXED 1.5× Decode Causal 这一格的 17,795 次 retry 支撑。</p>
           <p class="fine">注意：0.14036 是本模拟器 frozen contract 下的 normalized strict output goodput，不是 requests／s，也不能与 M4 的 queue 数字或论文 TTFT 直接相除。57.07% 是 infinite single-global token ceiling；M12 的 per-node、finite-capacity、queue-aware 结果属于另一实验合同。</p>
-          <h3>5.3 Kill／narrow criteria</h3>
+          <h3>5.3 Resource sizing：有 shared KVS 后，目标不再只是 hit</h3>
+          <div class="call">
+            <div class="label">这一段回答什么</div>
+            <ul><li>原始 request timestamp 已经固定。现在问：在 completion、SLO、公平性和 queue 都过线时，最少需要几个 Prefill node？</li><li>答案记作 <code>N*</code>。它比较的是同一 frozen normalized model 下的资源前沿，不是真实 GPU 容量承诺。</li><li>这把原题的“选哪个 Prefill node”扩展成“用什么 topology、最少几个 P，仍能按时完成”。</li></ul>
+          </div>
+          <svg role="img" aria-label="resource sizing 全枚举流程" viewBox="0 0 980 210">
+            <defs><marker id="size-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#64748b"/></marker></defs>
+            <g fill="#eef2ff" stroke="#4338ca" stroke-width="2"><rect x="20" y="64" width="155" height="76" rx="12"/><rect x="220" y="64" width="155" height="76" rx="12"/><rect x="420" y="64" width="155" height="76" rx="12"/><rect x="620" y="64" width="155" height="76" rx="12"/><rect x="820" y="64" width="140" height="76" rx="12"/></g>
+            <g font-size="15" text-anchor="middle" fill="#172033"><text x="97" y="94">Raw trace</text><text x="97" y="118">23,608 requests</text><text x="297" y="94">枚举 P=1～8</text><text x="297" y="118">不假设单调／不二分</text><text x="497" y="94">3 种 KVS topology</text><text x="497" y="118">local／shared／ideal</text><text x="697" y="94">Causal replay</text><text x="697" y="118">queue／SLO／fairness</text><text x="890" y="94">取最小 N*</text><text x="890" y="118">附 P−1 失败证明</text></g>
+            <g stroke="#64748b" stroke-width="2" marker-end="url(#size-arrow)"><line x1="175" y1="102" x2="215" y2="102"/><line x1="375" y1="102" x2="415" y2="102"/><line x1="575" y1="102" x2="615" y2="102"/><line x1="775" y1="102" x2="815" y2="102"/></g>
+          </svg>
+          <h3>5.3.1 三种 topology 到底差在哪里</h3>
+          <table><thead><tr><th>Topology</th><th>命中从哪里来</th><th>付出的代价</th><th>角色</th></tr></thead><tbody>
+            <tr><td><code>LOCAL_ONLY</code></td><td>只有选中 P node 的 local cache 可复用</td><td>调度改变会丢 locality；不产生 remote KVS 流量</td><td>可部署 baseline</td></tr>
+            <tr><td><code>SHARED_KVS</code></td><td>任意 P 可取回 cluster 已有 block</td><td>按 65,536 bytes／token 计入 transfer bytes 和 normalized transfer work</td><td>可部署候选；不是“免费 global cache”</td></tr>
+            <tr><td><code>IDEAL_GLOBAL_KVS_CONTROL</code></td><td>同一全局 cache 始终可见</td><td>假设 transfer cost=0、无限 bandwidth</td><td><strong>不可部署</strong>；只标资源理论下界</td></tr>
+          </tbody></table>
+          <div class="call warn"><div class="label">为什么这轮故意不测 eviction</div><ul><li>每个 P node 的 cache capacity 都设为等于 trace 的全部 unique keys 数量，足以容纳完整 key 集，标记为 <code>NO_EVICTION_CAPACITY_CONTROL_PER_P_NODE</code>。</li><li>目的是只观察 P 数量和 KVS topology，不让 LRU／TTL 把因果关系混进来。</li><li>所以这一节不能回答显存多大、TTL 多久、哪种淘汰策略最好；这些仍属于 B0／hardware calibration。</li></ul></div>
+          <h3>5.3.2 Gate 是什么，为什么不是“跑完就算通过”</h3>
+          <table><thead><tr><th>Gate</th><th>普通门槛</th><th>严格 sensitivity</th><th>白话解释</th></tr></thead><tbody>
+            <tr><td>Completion</td><td>100%</td><td>100%</td><td>所有 offered request 最终完成</td></tr>
+            <tr><td>Minimum tier SLO attainment</td><td>≥0.80</td><td>≥0.95</td><td>看最差服务等级；不能用平均值掩盖弱 tier</td></tr>
+            <tr><td>Jain fairness</td><td>≥0.90</td><td>≥0.90</td><td>不同 synthetic tenant 得到的服务不能差太远</td></tr>
+            <tr><td>P queue p95</td><td>≤20,000</td><td>≤20,000</td><td>单位是 normalized token-work，不是 ms</td></tr>
+            <tr><td>KVS bytes／work</td><td>≤1,000,000</td><td>≤1,000,000</td><td>remote 搬运不能无限放大；单位不是真实链路 GB／s</td></tr>
+          </tbody></table>
+          <h3>5.3.3 最终结果：shared KVS 在本模型里少用多少 P</h3>
+          <table><thead><tr><th>Topology</th><th>普通门槛 N*</th><th>严格门槛 N*</th><th>相对 local-only</th></tr></thead><tbody>
+            <tr><td>Ideal global KVS control</td><td>2</td><td>4</td><td>零成本、不可部署的下界</td></tr>
+            <tr><td>Local-only cache</td><td>3</td><td>7</td><td>baseline</td></tr>
+            <tr class="best"><td>Shared KVS，计入 transfer cost</td><td><strong>2</strong></td><td><strong>4</strong></td><td>少 1／3 个 P，即 <strong>33.3%／42.9%</strong></td></tr>
+          </tbody></table>
+          <div class="grid2"><div class="card"><div class="label">普通门槛的 P−1 证据</div><ul><li>Local P=2：minimum tier=0.7596＜0.80，失败。</li><li>Shared P=2：minimum tier=0.8508，全部 gate 通过。</li><li>Shared P=1：tier=0、Jain=0.7388、queue p95=3,201,033，失败。</li></ul></div><div class="card"><div class="label">严格门槛的 P−1 证据</div><ul><li>Local P=6：minimum tier=0.9431＜0.95，失败；P=7 通过。</li><li>Shared P=3：minimum tier=0.9427＜0.95，失败；P=4 达到 0.9611。</li><li>真正 binding 的是最差 tier SLO，不是平均 utilization 或 KVS bandwidth。</li></ul></div></div>
+          <div class="call"><div class="label">对大规模 distributed PD 的可执行 insight</div><ul><li><strong>有 shared KVS：</strong>selector 的主目标应从“最大 cache hit”升级为“最小 required P”，同时把 queue、minimum-tier、fairness、KVS cost 当硬约束。</li><li><strong>没有 shared KVS：</strong>placement locality 仍然直接决定要补算多少 prefill，因此 stable ownership／session affinity 仍有价值。</li><li><strong>最值钱的点：</strong>不是把 57% hit 再抬一点，而是把复用能力兑换成可验证的 P resource saving。</li></ul></div>
+          <table><thead><tr><th>现在可以说</th><th>现在不能说</th><th>升级为生产结论还缺什么</th></tr></thead><tbody><tr><td>本 trace＋frozen normalized model 下，shared KVS 的 N* 为 2／4，local 为 3／7</td><td>不能说节省同等比例真实 GPU、提升同等比例 QPS／MFU</td><td>真实 prefill service time、KVT bandwidth／overlap、TTFT／TPOT、真实 tenant／tier、有限显存 eviction</td></tr></tbody></table>
+          <p class="fine">可复现证据：<code>src/prefill_cache_sim/m12_sizing.py</code>、<code>scripts/run_m12_sizing.py</code>、<code>results/m12-sizing/contract.json</code>、<code>cells.csv</code>、<code>verdict.json</code>、<code>provenance.json</code> 与 <code>MANIFEST.json</code>。provenance 指向 clean commit ca9affd。</p>
+          <h3>5.4 Kill／narrow criteria</h3>
           <ol>
             <li>
               R1 若显示 production baseline headroom＜2 pp 且无 load-skew
