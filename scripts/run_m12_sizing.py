@@ -79,6 +79,7 @@ RESULT_FIELDS = (
     "normalized_kvs_work",
     "decision_fingerprint",
 )
+_FORK_WORKLOAD: PlacementWorkload | None = None
 
 
 def build_plan(
@@ -119,15 +120,17 @@ def run_grid(
     if type(jobs) is not int or jobs <= 0:
         raise ValueError("jobs must be a plain positive integer")
     args = tuple(
-        (workload, topology, p_count, max(1, unique_keys))
+        (topology, p_count, max(1, unique_keys))
         for topology, p_count in plan
     )
     records: list[SizingRunRecord] = []
     if jobs == 1:
         for index, value in enumerate(args, 1):
-            print(f"[{index}/{len(plan)}] {value[1].value} P={value[2]}", flush=True)
-            records.append(_run_grid_cell(value))
+            print(f"[{index}/{len(plan)}] {value[0].value} P={value[1]}", flush=True)
+            records.append(_run_grid_cell(value, workload))
     else:
+        global _FORK_WORKLOAD
+        _FORK_WORKLOAD = workload
         with ProcessPoolExecutor(
             max_workers=min(jobs, len(args)), mp_context=get_context("fork")
         ) as executor:
@@ -136,18 +139,22 @@ def run_grid(
                 value = pending[future]
                 records.append(future.result())
                 print(
-                    f"[{index}/{len(plan)}] done {value[1].value} P={value[2]}",
+                    f"[{index}/{len(plan)}] done {value[0].value} P={value[1]}",
                     flush=True,
                 )
     return records, trace_metadata
 
 
 def _run_grid_cell(
-    value: tuple[PlacementWorkload, SizingTopology, int, int],
+    value: tuple[SizingTopology, int, int],
+    workload: PlacementWorkload | None = None,
 ) -> SizingRunRecord:
-    workload, topology, p_count, capacity = value
+    topology, p_count, capacity = value
+    active_workload = workload if workload is not None else _FORK_WORKLOAD
+    if active_workload is None:
+        raise RuntimeError("fork worker did not inherit the sizing workload")
     return run_sizing_cell(
-        workload,
+        active_workload,
         p_count=p_count,
         topology=topology,
         gates=BASELINE_GATES,
