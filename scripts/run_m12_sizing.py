@@ -12,7 +12,9 @@ import os
 import sys
 import tempfile
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, replace
+from multiprocessing import get_context
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,6 +100,7 @@ def run_grid(
     p_counts: Sequence[int] = DEFAULT_P_COUNTS,
     topologies: Sequence[SizingTopology] = DEFAULT_TOPOLOGIES,
     limit: int | None = None,
+    jobs: int = 1,
 ) -> tuple[list[SizingRunRecord], Mapping[str, object]]:
     workload, trace_metadata = build_trace_workload(trace_path)
     workload = restore_raw_trace_timestamps(workload)
@@ -113,26 +116,47 @@ def run_grid(
         if limit <= 0:
             raise ValueError("limit must be positive")
         plan = plan[:limit]
+    if type(jobs) is not int or jobs <= 0:
+        raise ValueError("jobs must be a plain positive integer")
+    args = tuple(
+        (workload, topology, p_count, max(1, unique_keys))
+        for topology, p_count in plan
+    )
     records: list[SizingRunRecord] = []
-    for index, (topology, p_count) in enumerate(plan, 1):
-        print(
-            f"[{index}/{len(plan)}] {topology.value} P={p_count}",
-            flush=True,
-        )
-        records.append(
-            run_sizing_cell(
-                workload,
-                p_count=p_count,
-                topology=topology,
-                gates=BASELINE_GATES,
-                regime=SERVICE_REGIMES[2],
-                observation_end_work=SIZING_OBSERVATION_END_WORK,
-                tier_slo_work=TIER_SLO_WORK,
-                cache_capacity_entries_per_p=max(1, unique_keys),
-                decode_node_count=8,
-            )
-        )
+    if jobs == 1:
+        for index, value in enumerate(args, 1):
+            print(f"[{index}/{len(plan)}] {value[1].value} P={value[2]}", flush=True)
+            records.append(_run_grid_cell(value))
+    else:
+        with ProcessPoolExecutor(
+            max_workers=min(jobs, len(args)), mp_context=get_context("fork")
+        ) as executor:
+            pending = {executor.submit(_run_grid_cell, value): value for value in args}
+            for index, future in enumerate(as_completed(pending), 1):
+                value = pending[future]
+                records.append(future.result())
+                print(
+                    f"[{index}/{len(plan)}] done {value[1].value} P={value[2]}",
+                    flush=True,
+                )
     return records, trace_metadata
+
+
+def _run_grid_cell(
+    value: tuple[PlacementWorkload, SizingTopology, int, int],
+) -> SizingRunRecord:
+    workload, topology, p_count, capacity = value
+    return run_sizing_cell(
+        workload,
+        p_count=p_count,
+        topology=topology,
+        gates=BASELINE_GATES,
+        regime=SERVICE_REGIMES[2],
+        observation_end_work=SIZING_OBSERVATION_END_WORK,
+        tier_slo_work=TIER_SLO_WORK,
+        cache_capacity_entries_per_p=capacity,
+        decode_node_count=8,
+    )
 
 
 def build_artifacts(
@@ -505,11 +529,13 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=ROOT / "results/m12-sizing")
     parser.add_argument("--p-counts", type=_parse_counts, default=DEFAULT_P_COUNTS)
     parser.add_argument("--limit", type=int)
+    parser.add_argument("--jobs", type=int, default=1)
     args = parser.parse_args()
     records, trace_metadata = run_grid(
         args.trace,
         p_counts=args.p_counts,
         limit=args.limit,
+        jobs=args.jobs,
     )
     publish(args.output, build_artifacts(records, trace_metadata))
     return 0
