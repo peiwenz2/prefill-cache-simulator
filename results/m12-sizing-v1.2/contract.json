@@ -1,4 +1,5 @@
 {
+  "alive_blocks_semantics": "resident cache keys at observation end; mean/min/max across P nodes",
   "baseline_gates": {
     "maximum_kvs_bytes_per_work": 1000000.0,
     "maximum_p_queue_p95_work": 20000.0,
@@ -8,10 +9,12 @@
   },
   "cache_capacity_mode": "NO_EVICTION_CAPACITY_CONTROL_PER_P_NODE",
   "claim_basis": "NORMALIZED_SIMULATION",
+  "deadline_frontier_semantics": "evaluator-only: scale tier deadlines post-hoc while routing, execution, costs, queue gates, and KVS gates remain frozen",
   "decode_node_count": 8,
   "gpu_capacity_claim": false,
   "observation_end_work": 6000000.0,
-  "schema_version": "m12-sizing-v2.1",
+  "queue_wait_definition": "actual ATTEMPT_READY to PREFILL_START elapsed work",
+  "schema_version": "m12-sizing-v2.2",
   "service_costs": {
     "decode_batch_max_saving": 0.25,
     "decode_batch_saturation_sequences": 48,
@@ -38,6 +41,7 @@
   },
   "timestamp_mapping": "raw trace timestamp_ms, no replay slowdown",
   "trace_truth_basis": "SYNTHETIC_TENANT_TIER_ON_TRACE",
+  "utilization_semantics": "normalized issued GPU work divided by modeled pool capacity; not MFU",
   "wall_clock_claim": false,
   "zero_transfer_price_control_deployable": false
 }

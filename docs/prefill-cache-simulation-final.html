@@ -108,21 +108,21 @@ KV_bytes        = remote_hit_tokens × 65,536</pre>
 <div class="eyebrow">06 · Full v2.2 result</div><h2>Deadline 松紧、queue、utilization 和 alive blocks</h2>
 <div class="call"><div class="label">Deadline sensitivity 的准确语义</div>只把三个 tier deadline 同比乘 0.5×～2.0×，routing、执行顺序、service cost、queue gate 和 KVS gate 全部冻结。它回答“同一批执行结果换一条 deadline 线会怎样”，不是 policy-aware reroute。</div>
 <table><thead><tr><th>Deadline</th><th>Local N*</th><th>Shared N*</th><th>结论</th></tr></thead><tbody>
-<tr><td>0.50×</td><td data-slot="local-050">TBD</td><td data-slot="shared-050">TBD</td><td data-slot="note-050">TBD</td></tr>
-<tr><td>0.75×</td><td data-slot="local-075">TBD</td><td data-slot="shared-075">TBD</td><td data-slot="note-075">TBD</td></tr>
-<tr><td>1.00×</td><td data-slot="local-100">TBD</td><td data-slot="shared-100">TBD</td><td data-slot="note-100">TBD</td></tr>
-<tr><td>1.25×</td><td data-slot="local-125">TBD</td><td data-slot="shared-125">TBD</td><td data-slot="note-125">TBD</td></tr>
-<tr><td>1.50×</td><td data-slot="local-150">TBD</td><td data-slot="shared-150">TBD</td><td data-slot="note-150">TBD</td></tr>
-<tr><td>2.00×</td><td data-slot="local-200">TBD</td><td data-slot="shared-200">TBD</td><td data-slot="note-200">TBD</td></tr>
+<tr><td>0.50×</td><td>≤8 无解</td><td>≤8 无解</td><td>deadline 砍半后，最差 tier gate 无法通过；禁止外推。</td></tr>
+<tr><td>0.75×</td><td>3</td><td>3</td><td>两者都需要 3 P；Shared 不省资源。</td></tr>
+<tr><td>1.00×</td><td><strong>3</strong></td><td><strong>2</strong></td><td>唯一本 sweep 中 Shared 少 1 P 的点：3→2，减少 33.3%。</td></tr>
+<tr><td>1.25×</td><td>2</td><td>2</td><td>deadline 放宽后 Local 也降到 2 P，Shared 优势消失。</td></tr>
+<tr><td>1.50×</td><td>2</td><td>2</td><td>受 P=1 的 queue/fairness gate 限制，不能继续降。</td></tr>
+<tr><td>2.00×</td><td>2</td><td>2</td><td>继续放宽 deadline 也不能把 P 从 2 降到 1。</td></tr>
 </tbody></table>
 <h3>同样 P 的 operational head-to-head</h3>
 <table><thead><tr><th>Case</th><th>Token hit</th><th>Actual P queue wait p95</th><th>P/D modeled utilization</th><th>Final alive blocks/P</th></tr></thead><tbody>
-<tr><td>Local P2</td><td data-slot="lp2-hit">TBD</td><td data-slot="lp2-q">TBD</td><td data-slot="lp2-u">TBD</td><td data-slot="lp2-b">TBD</td></tr>
-<tr><td>Shared P2</td><td data-slot="sp2-hit">TBD</td><td data-slot="sp2-q">TBD</td><td data-slot="sp2-u">TBD</td><td data-slot="sp2-b">TBD</td></tr>
-<tr><td>Local P4</td><td data-slot="lp4-hit">TBD</td><td data-slot="lp4-q">TBD</td><td data-slot="lp4-u">TBD</td><td data-slot="lp4-b">TBD</td></tr>
-<tr><td>Shared P4</td><td data-slot="sp4-hit">TBD</td><td data-slot="sp4-q">TBD</td><td data-slot="sp4-u">TBD</td><td data-slot="sp4-b">TBD</td></tr>
+<tr><td>Local P2</td><td>54.62%</td><td>7,178.22 work-time</td><td>P 46.02%／D 8.96%</td><td>mean 96,450.5；95,325～97,576</td></tr>
+<tr><td>Shared P2</td><td>56.80%</td><td>6,409.96 work-time</td><td>P 43.80%／D 8.96%</td><td>mean 100,995.5；100,636～101,355</td></tr>
+<tr><td>Local P4</td><td>54.56%</td><td>1,484.04 work-time</td><td>P 23.04%／D 8.96%</td><td>mean 48,283.5；46,832～50,031</td></tr>
+<tr><td>Shared P4</td><td>56.83%</td><td>1,422.84 work-time</td><td>P 21.89%／D 8.96%</td><td>mean 52,726.0；51,774～54,120</td></tr>
 </tbody></table>
-<div class="call bad"><div class="label">Publication gate</div>本页 TBD 必须由 v2.2 MANIFEST 内的 cells.csv 与 deadline-frontier.csv 填入并复算，不能凭代码存在就写数。</div>
+<div class="grid2"><div class="call ok"><div class="label">P=2 的量化收益</div><ul><li>Token hit ＋2.18pp。</li><li>Actual queue wait p95 下降 768.26 work-time，－10.70%。</li><li>P modeled utilization 46.02%→43.80%，说明 remote fetch 替换了部分 recompute。</li><li>STRICT on-time requests 多 165 条，刚好跨过 80% gate。</li></ul></div><div class="call warn"><div class="label">为什么 alive blocks/P 反而更多</div><ul><li>Shared P2 的 mean final alive blocks 比 Local 多 4,545，＋4.71%。</li><li>原因是每个 P 在 request 完成后仍 admit 全部 prefix；不同路由会产生副本。</li><li>本 sizing 是 no eviction，因此这是“结束时 resident keys”，不是显存容量需求。</li><li>真实 TTL/LRU 会改变这条曲线，不能直接换算 GPU memory。</li></ul></div></div>
 </section>
 
 <section>
