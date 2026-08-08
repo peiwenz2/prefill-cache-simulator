@@ -132,8 +132,16 @@ class SizingRunRecord:
     remote_hit_tokens: int
     recompute_tokens: int
     p_normalized_utilization: float
+    d_normalized_utilization: float
+    p_queue_wait_p50_work: float
+    p_queue_wait_p95_work: float
+    p_queue_wait_p99_work: float
+    final_alive_blocks_mean_per_p: float
+    final_alive_blocks_min_per_p: int
+    final_alive_blocks_max_per_p: int
     normalized_kvs_work: float
     per_tier_slo_attainment: Mapping[str, float]
+    per_tier_completion_elapsed_work: Mapping[str, tuple[float, ...]]
     decision_fingerprint: str
 
     def __post_init__(self) -> None:
@@ -156,6 +164,18 @@ class SizingRunRecord:
             self,
             "per_tier_slo_attainment",
             MappingProxyType(tiers),
+        )
+        elapsed = {
+            tier: tuple(values)
+            for tier, values in self.per_tier_completion_elapsed_work.items()
+        }
+        if set(elapsed) != set(tiers) or any(
+            any(value < 0 or math.isnan(value) for value in values)
+            for values in elapsed.values()
+        ):
+            raise ValueError("completion elapsed samples must match valid tiers")
+        object.__setattr__(
+            self, "per_tier_completion_elapsed_work", MappingProxyType(elapsed)
         )
 
 
@@ -205,6 +225,26 @@ def run_sizing_cell(
     policy = _sizing_policy(topology, cost, resized)
     result = CausalKernel(config).run(resized, policy)
     report = policy.summarize(result)
+    requests_by_id = {
+        request.logical.logical_request_id: request for request in resized
+    }
+    queue_waits: list[float] = []
+    elapsed_by_tier: dict[str, list[float]] = {
+        tier: [] for tier in tier_slo_work
+    }
+    for attempt in result.attempts:
+        request = requests_by_id[attempt.logical_request_id]
+        if attempt.prefill_start_work is not None:
+            queue_waits.append(
+                max(0.0, attempt.prefill_start_work - attempt.attempt_ready_work)
+            )
+        elapsed_by_tier[request.logical.tier].append(
+            math.inf
+            if attempt.finish_work is None
+            else max(0.0, attempt.finish_work - request.logical.arrival_work)
+        )
+    queue_waits.sort()
+    block_counts = tuple(len(result.cache_by_node[node]) for node in p_nodes)
     completed = {
         attempt.logical_request_id for attempt in result.attempts if attempt.completed
     }
@@ -238,10 +278,24 @@ def run_sizing_cell(
         report.remote_hit_tokens,
         report.uncached_tokens,
         result.metrics.prefill_normalized_utilization,
+        result.metrics.decode_normalized_utilization,
+        _percentile(queue_waits, 0.50),
+        _percentile(queue_waits, 0.95),
+        _percentile(queue_waits, 0.99),
+        sum(block_counts) / len(block_counts),
+        min(block_counts),
+        max(block_counts),
         result.metrics.kvs_normalized_work,
         result.metrics.per_tier_slo_attainment,
+        {tier: tuple(values) for tier, values in elapsed_by_tier.items()},
         _decision_fingerprint(policy),
     )
+
+
+def _percentile(values: Sequence[float], fraction: float) -> float:
+    if not values:
+        return 0.0
+    return values[math.ceil(fraction * len(values)) - 1]
 
 
 @overload

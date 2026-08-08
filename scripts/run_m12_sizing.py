@@ -38,12 +38,13 @@ from scripts.run_m12_placement import (  # noqa: E402
     build_trace_workload,
 )
 
-SCHEMA_VERSION = "m12-sizing-v2.1"
+SCHEMA_VERSION = "m12-sizing-v2.2"
 DEFAULT_P_COUNTS = tuple(range(1, 9))
 DEFAULT_TOPOLOGIES = tuple(SizingTopology)
 BASELINE_GATES = SizingGates(1.0, 0.80, 0.90, 20_000.0, 1_000_000.0)
 STRICT_95_GATES = SizingGates(1.0, 0.95, 0.90, 20_000.0, 1_000_000.0)
 TIER_FLOOR_SENSITIVITY = tuple(value / 100 for value in range(70, 99))
+DEADLINE_MULTIPLIERS = (0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
 SIZING_OBSERVATION_END_WORK = OBSERVATION_END_WORK / ARRIVAL_SCALE
 RESULT_FIELDS = (
     "topology",
@@ -66,6 +67,13 @@ RESULT_FIELDS = (
     "remote_hit_tokens",
     "recompute_tokens",
     "p_normalized_utilization",
+    "d_normalized_utilization",
+    "p_queue_wait_p50_work",
+    "p_queue_wait_p95_work",
+    "p_queue_wait_p99_work",
+    "final_alive_blocks_mean_per_p",
+    "final_alive_blocks_min_per_p",
+    "final_alive_blocks_max_per_p",
     "normalized_kvs_work",
     "decision_fingerprint",
 )
@@ -168,6 +176,17 @@ def build_artifacts(
         "baseline_gates": asdict(BASELINE_GATES),
         "strict_95_gates": asdict(STRICT_95_GATES),
         "zero_transfer_price_control_deployable": False,
+        "queue_wait_definition": "actual ATTEMPT_READY to PREFILL_START elapsed work",
+        "utilization_semantics": (
+            "normalized issued GPU work divided by modeled pool capacity; not MFU"
+        ),
+        "alive_blocks_semantics": (
+            "resident cache keys at observation end; mean/min/max across P nodes"
+        ),
+        "deadline_frontier_semantics": (
+            "evaluator-only: scale tier deadlines post-hoc while routing, execution, "
+            "costs, queue gates, and KVS gates remain frozen"
+        ),
     }
     summary = {
         "baseline": baseline_verdicts,
@@ -188,6 +207,17 @@ def build_artifacts(
         "threshold-frontier.csv": _csv_bytes(
             _threshold_frontier_rows(baseline_cells),
             ("tier_slo_floor", "topology", "minimum_feasible_p"),
+        ),
+        "deadline-frontier.csv": _csv_bytes(
+            _deadline_frontier_rows(records),
+            (
+                "deadline_multiplier",
+                "strict_deadline_work",
+                "standard_deadline_work",
+                "relaxed_deadline_work",
+                "topology",
+                "minimum_feasible_p",
+            ),
         ),
         "verdict.json": _json_bytes(summary),
         "provenance.json": _json_bytes(provenance_payload),
@@ -214,6 +244,62 @@ def _threshold_frontier_rows(
             rows.append(
                 {
                     "tier_slo_floor": floor,
+                    "topology": topology.value,
+                    "minimum_feasible_p": (
+                        verdict.minimum_feasible_p
+                        if verdict.minimum_feasible_p is not None
+                        else "GRID_EXHAUSTED"
+                    ),
+                }
+            )
+    return rows
+
+
+def _deadline_frontier_rows(
+    records: Sequence[SizingRunRecord],
+) -> list[dict[str, object]]:
+    """Evaluator-only deadline sensitivity; routing and execution stay frozen."""
+    rows: list[dict[str, object]] = []
+    for multiplier in DEADLINE_MULTIPLIERS:
+        scaled_cells: list[SizingCell] = []
+        for record in records:
+            per_tier = {
+                tier: (
+                    sum(
+                        elapsed <= TIER_SLO_WORK[tier] * multiplier
+                        for elapsed in samples
+                    )
+                    / len(samples)
+                    if samples
+                    else 0.0
+                )
+                for tier, samples in record.per_tier_completion_elapsed_work.items()
+            }
+            observation = replace(
+                record.cell.observation,
+                minimum_tier_slo_attainment=min(per_tier.values()),
+            )
+            scaled_cells.append(
+                replace(
+                    record.cell,
+                    observation=observation,
+                    failed_gates=(),
+                )
+            )
+        evaluated = tuple(_reevaluate(cell, BASELINE_GATES) for cell in scaled_cells)
+        for topology in sorted(SizingTopology, key=lambda value: value.value):
+            verdict = select_minimum(
+                evaluated,
+                BASELINE_GATES,
+                include_control=True,
+                required_topologies=(topology,),
+            )
+            rows.append(
+                {
+                    "deadline_multiplier": multiplier,
+                    "strict_deadline_work": TIER_SLO_WORK["STRICT"] * multiplier,
+                    "standard_deadline_work": TIER_SLO_WORK["STANDARD"] * multiplier,
+                    "relaxed_deadline_work": TIER_SLO_WORK["RELAXED"] * multiplier,
                     "topology": topology.value,
                     "minimum_feasible_p": (
                         verdict.minimum_feasible_p
@@ -349,6 +435,13 @@ def _record_row(
         "remote_hit_tokens": record.remote_hit_tokens,
         "recompute_tokens": record.recompute_tokens,
         "p_normalized_utilization": record.p_normalized_utilization,
+        "d_normalized_utilization": record.d_normalized_utilization,
+        "p_queue_wait_p50_work": record.p_queue_wait_p50_work,
+        "p_queue_wait_p95_work": record.p_queue_wait_p95_work,
+        "p_queue_wait_p99_work": record.p_queue_wait_p99_work,
+        "final_alive_blocks_mean_per_p": record.final_alive_blocks_mean_per_p,
+        "final_alive_blocks_min_per_p": record.final_alive_blocks_min_per_p,
+        "final_alive_blocks_max_per_p": record.final_alive_blocks_max_per_p,
         "normalized_kvs_work": record.normalized_kvs_work,
         "decision_fingerprint": record.decision_fingerprint,
     }

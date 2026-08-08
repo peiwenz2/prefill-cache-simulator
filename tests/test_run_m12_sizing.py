@@ -42,8 +42,20 @@ def record(
         5,
         15,
         0.7,
+        0.4,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        3,
+        5,
         0.2,
         {"STRICT": 0.9, "STANDARD": 0.95, "RELAXED": 0.99},
+        {
+            "STRICT": (10.0, 20.0),
+            "STANDARD": (10.0,),
+            "RELAXED": (10.0,),
+        },
         hashlib.sha256(f"{topology}-{p_count}".encode()).hexdigest(),
     )
 
@@ -74,8 +86,16 @@ def test_record_rejects_tier_maps_that_serializer_cannot_publish(
             5,
             15,
             0.7,
+            0.4,
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            3,
+            5,
             0.2,
             tiers,
+            {tier: (10.0,) for tier in tiers},
             "f" * 64,
         )
     with pytest.raises(ValueError, match="requires exactly STRICT"):
@@ -161,7 +181,7 @@ def test_artifacts_are_deterministic_and_exclude_zero_price_control_from_winner(
     assert provenance["record_count"] == 23_608
     assert provenance["sizing_cell_count"] == len(records)
     contract = json.loads(first["contract.json"])
-    assert contract["schema_version"] == "m12-sizing-v2.1"
+    assert contract["schema_version"] == "m12-sizing-v2.2"
     assert contract["service_costs"]["prefill_token_work"] == 0.06
     assert contract["service_costs"]["decode_token_work"] == 1.0
     assert contract["service_costs"]["kvs_token_work"] == 0.01
@@ -178,6 +198,18 @@ def test_artifacts_are_deterministic_and_exclude_zero_price_control_from_winner(
     }
     assert {row["topology"] for row in frontier} == {
         topology.value for topology in SizingTopology
+    }
+    deadlines = list(
+        csv.DictReader(io.StringIO(first["deadline-frontier.csv"].decode()))
+    )
+    assert len(deadlines) == 6 * 3
+    assert {float(row["deadline_multiplier"]) for row in deadlines} == {
+        0.5,
+        0.75,
+        1.0,
+        1.25,
+        1.5,
+        2.0,
     }
     output = tmp_path / "result"
     publish(output, first)

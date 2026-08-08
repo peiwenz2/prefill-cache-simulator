@@ -292,3 +292,30 @@ def test_sizing_cell_resizes_cohort_eligibility_to_requested_p_count() -> None:
     )
     assert len(record.decision_fingerprint) == 64
     assert record.recompute_tokens == 10
+
+
+def test_sizing_reports_actual_queue_wait_and_final_blocks_per_p() -> None:
+    workload = build_kernel_requests(
+        [
+            _trace_row("first", 0, ("A",), (10,)),
+            _trace_row("second", 0, ("B",), (10,)),
+        ]
+    )
+    record = run_sizing_cell(
+        workload,
+        p_count=1,
+        topology=SizingTopology.LOCAL_ONLY,
+        gates=gates(),
+        regime=SERVICE_REGIMES[2],
+        observation_end_work=100,
+        tier_slo_work={"STANDARD": 100},
+        cache_capacity_entries_per_p=8,
+        decode_node_count=2,
+    )
+    assert record.p_queue_wait_p50_work == 0
+    assert record.p_queue_wait_p95_work > 0
+    assert record.p_queue_wait_p99_work == record.p_queue_wait_p95_work
+    assert record.final_alive_blocks_mean_per_p == 2
+    assert record.final_alive_blocks_min_per_p == 2
+    assert record.final_alive_blocks_max_per_p == 2
+    assert record.d_normalized_utilization >= 0

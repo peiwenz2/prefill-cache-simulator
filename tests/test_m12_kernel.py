@@ -289,6 +289,13 @@ def test_completion_is_materialized_before_same_time_arrival() -> None:
         "COMPLETION",
         "ARRIVAL",
     ]
+    first = result.attempts[0]
+    assert first.attempt_ready_work == 0
+    assert first.prefill_start_work == 0
+    assert first.p_node_id == "p0"
+    assert result.cache_by_node["p0"] == frozenset(
+        {"shared", "logical:second"}
+    )
 
 
 def test_decode_gate_hook_delays_only_d_start_and_emits_lifecycle_event() -> None:

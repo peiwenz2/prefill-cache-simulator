@@ -420,6 +420,11 @@ class ExecutedAttempt:
     finish_work: float | None
     strict_slo_met: bool
     outcome: AttemptOutcome
+    p_node_id: str
+    d_node_id: str
+    attempt_ready_work: float
+    prefill_start_work: float | None
+    decode_start_work: float | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -428,6 +433,7 @@ class KernelResult:
     metrics: M12MetricReport
     events: tuple[KernelEvent, ...]
     completed_cache_keys: frozenset[str]
+    cache_by_node: Mapping[str, frozenset[str]]
 
 
 @dataclass(slots=True)
@@ -440,6 +446,8 @@ class _Pending:
     kvs_work: float = 0
     kvs_bytes: int = 0
     decode_start: float | None = None
+    attempt_ready: float | None = None
+    prefill_start: float | None = None
 
 
 class CausalKernel:
@@ -545,6 +553,7 @@ class CausalKernel:
                 ready_key = payload
                 assert isinstance(ready_key, tuple)
                 item = planned.pop(ready_key)
+                item.attempt_ready = at
                 pending[ready_key] = item
                 spec = item.spec
                 queued_work[spec.p_node_id] += self._maximum_prefill_work(item.request)
@@ -561,6 +570,7 @@ class CausalKernel:
                 start_key = payload
                 assert isinstance(start_key, tuple)
                 item = pending[start_key]
+                item.prefill_start = at
                 self._price_prefill(item, cache)
                 node_id = item.spec.p_node_id
                 queued_work[node_id] = _remaining_queue_work(
@@ -892,6 +902,9 @@ class CausalKernel:
             metrics,
             tuple(event_log),
             frozenset(cache_snapshots.view()[1]),
+            MappingProxyType(
+                {node: frozenset(keys) for node, keys in cache.items()}
+            ),
         )
 
     def _materialize(self, item: _Pending) -> ExecutedAttempt:
@@ -950,6 +963,15 @@ class CausalKernel:
             finish,
             strict,
             outcome,
+            item.spec.p_node_id,
+            item.spec.d_node_id,
+            (
+                item.attempt_ready
+                if item.attempt_ready is not None
+                else math.inf
+            ),
+            item.prefill_start,
+            item.decode_start,
         )
 
     def _validate_workload(self, workload: tuple[KernelRequestSpec, ...]) -> None:
