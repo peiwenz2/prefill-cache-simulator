@@ -527,7 +527,7 @@ Resource sizing 回答：在 completion、SLO、公平性和 queue 都过线时�
 | P queue p95 | ≤20,000 work | 95% 决策点看到的 P backlog；不是 elapsed time 或 ms | 只在 P=1 失败 |
 | KVS bytes／work | ≤1,000,000 | Remote transfer guardrail；不是真实 GB／s | 从未接近上限 |
 
-P=1 虽然 completion=100%，但 minimum-tier=0、Jain=0.7388、queue p95=3,201,033，因此“让请求无限排队，最后跑完”仍不及格。
+P=1 虽然 completion=100%，但 minimum-tier=0、Jain=0.7154、queue backlog p95=3,851,640.90 work，因此“让请求无限排队，最后跑完”仍不及格。
 
 | 最差 tier 必须达到的按时率 | Local-only N* | Shared KVS N* | Zero-price N* | 怎么读 |
 |---:|---:|---:|---:|---|
@@ -548,7 +548,7 @@ P=1 虽然 completion=100%，但 minimum-tier=0、Jain=0.7388、queue p95=3,201,
 
 因此可证明的只有一个窄结论：在当前 MIXED v1.2、synthetic tenant／SLO 与 P=2 拥塞点，Shared KVS 让更多 STRICT request 按时完成；它没有证明 production 节省 GPU，也没有证明所有 SLO floor 都更好。78%～80% band 来自 Local P=2 的 77.43% 与 Shared P=2 的 80.88% 两个 crossover，frontier 只按 1pp 步长扫描。
 
-代码与证据：`src/prefill_cache_sim/m12_sizing.py`、`scripts/run_m12_sizing.py`、`results/m12-sizing-v1.2/{contract,cells,threshold-frontier,verdict,provenance,MANIFEST}`。v2.1 artifact 正在按新 schema 重跑；发布前会核对三档列与 manifest。
+代码与证据：`src/prefill_cache_sim/m12_sizing.py`、`scripts/run_m12_sizing.py`、`results/m12-sizing-v1.2/{contract,cells,threshold-frontier,verdict,provenance,MANIFEST}`。目录名 `v1.2` 表示 metric／cost contract 版本，目录内的 `m12-sizing-v2.1` 表示 sizing CSV schema 版本，两者不是同一个版本号。v2.1 artifact 正在按新 schema 重跑；发布前会核对三档列与 manifest。
 
 ### 5.4 大规模 distributed PD 的当前选择
 

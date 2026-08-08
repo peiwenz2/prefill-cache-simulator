@@ -2165,7 +2165,7 @@ if move_score - keep_score &gt; safety_margin: abort_self
             <tr><td>P queue p95</td><td>≤20,000 work</td><td>95% decisions 看到的 P backlog；不是 elapsed time 或 ms</td><td>只在 P=1 失败</td></tr>
             <tr><td>KVS bytes／work</td><td>≤1,000,000</td><td>Remote transfer guardrail；不是真实 GB／s</td><td>全 grid 最大为 ceiling 的 36.24%</td></tr>
           </tbody></table>
-          <div class="call"><div class="label">为什么“无限排队、最后都跑完”仍不及格</div><ul><li>P=1 的 completion=100%，没有 request 被丢掉。</li><li>但 minimum tier=0、Jain=0.7388、queue p95=3,201,033。</li><li>等待计入 <code>finish−arrival</code>；最终完成也不能补回 strict SLO credit。</li></ul></div>
+          <div class="call"><div class="label">为什么“无限排队、最后都跑完”仍不及格</div><ul><li>P=1 的 completion=100%，没有 request 被丢掉。</li><li>但 minimum tier=0、Jain=0.7154、queue backlog p95=3,851,640.90 work。</li><li>等待计入 <code>finish−arrival</code>；最终完成也不能补回 strict SLO credit。</li></ul></div>
 
           <h3>5.4.2 隔离变量后的 staircase</h3>
           <div class="call"><div class="label">表头到底是什么意思</div><ul><li>先用 tier deadline 判断每条 request 是否按时。</li><li>再按 STRICT／STANDARD／RELAXED 分别计算按时率。</li><li>Minimum-tier 是三个按时率里最小的那个。</li><li>Floor=80% 表示最差 tier 也必须至少 80% 按时；它不是 SLO=80%。</li></ul></div>
@@ -2186,7 +2186,7 @@ if move_score - keep_score &gt; safety_margin: abort_self
 
           <h3>5.5 可以说／不能说／下一步</h3>
           <table><thead><tr><th>可以说</th><th>不能说</th><th>下一步证伪</th></tr></thead><tbody><tr><td>本 trace＋MIXED v1.2 model 内，Shared 在 P=2 拥塞点改善最差 tier 与 queue；仅 78%～80% floor band 少 1 P</td><td>稳定 GPU 节省、QPS／MFU、production TTFT；Shared 在所有 SLO 都更好</td><td>KVS price sweep；换 tier seed；COMPUTE／MEMORY sizing；有限容量 eviction；M9 hardware calibration</td></tr></tbody></table>
-          <p class="fine">可复现证据：<code>results/m12-sizing-v1.2/cells.csv</code>、<code>threshold-frontier.csv</code>、<code>verdict.json</code>、<code>provenance.json</code>、<code>MANIFEST.json</code>。代码与 artifact 已备份到 GitHub main commit <code>16ffff9</code>。</p>
+          <p class="fine">可复现证据：<code>results/m12-sizing-v1.2/</code>。目录名 v1.2 是 metric／cost contract 版本；其中 m12-sizing-v2.1 是 CSV schema 版本。逐 tier 列的 clean rerun 正在生成，完成并核验 MANIFEST 前，正文整数计数仅由 minimum ratio 与 tier 分母交叉复算，不冒充已发布列。</p>
         </section>
 
         <template id="rollout-legacy-archive">

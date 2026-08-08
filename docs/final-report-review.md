@@ -124,7 +124,7 @@ Gate：
 | P queue p95 | ≤20,000 work | 人为 backlog guardrail；不是 elapsed time 或 ms | 只在 P=1 失败 |
 | KVS bytes／work | ≤1,000,000 | 人为 transfer guardrail | 全 grid 最大为 ceiling 的 36.24% |
 
-为什么不能无限排队：P=1 的 completion=100%，说明所有 request 最终都跑完；但 minimum tier=0、Jain=0.7388、queue p95=3,201,033。排队不会丢 request，却会让 request 越过自己的 deadline，因此不能算 healthy capacity。
+为什么不能无限排队：P=1 的 completion=100%，说明所有 request 最终都跑完；但 minimum tier=0、Jain=0.7154、queue backlog p95=3,851,640.90 work。排队不会丢 request，却会让 request 越过自己的 deadline，因此不能算 healthy capacity。
 
 隔离 routing 后的最终 N*：
 
@@ -135,15 +135,14 @@ Gate：
 | 81%～82% | 3 | 3 | 2 | priced Shared 与 Local 相同；zero-price 仍为 2 |
 | 83%～93% | 3 | 3 | 3 | 无资源差异 |
 | 94% | 3 | 4 | 3 | priced Shared 反而多 1 P，根因待验证 |
-| 90% | 3 | 3 | 3 | 无资源差异 |
 | 95% | 4 | 4 | 4 | 旧 `7→4` 撤回 |
 | 96% | 5 | 6 | 5 | priced Shared 反而多 1 P；禁止从局部门槛外推 |
 | 97% | P≤8 内不可行 | P≤8 内不可行 | P≤8 内不可行 | Grid exhausted，不能外推 |
 
-同 P 对比是在回答“remote reuse 的收益是否超过 transfer cost”，不是为了证明 Shared 一定赢。24 个 cell 的最差档都是 STRICT（4,780 条）。P=2 时，Local 3,701 条按时，Shared 3,866 条按时，即多 165 条；queue backlog p95 从 12,615.42 降到 11,446.36 work（－9.27%），与拥塞点有帮助一致。P=3 时，Shared 4,485／4,780＝93.83% 反而低于 Local 4,504／4,780＝94.23%，直接造成 94% floor 下 Shared 多用 1 P；机制根因待验证。P=4 时，按时率只从 95.82% 升到 95.90%，queue backlog p95 反而从 2,436.54 升到 2,445.12 work（＋0.35%），收益接近零。当前 tenant／tier 只使用一组 deterministic hash assignment，threshold frontier 尚未经过换 seed robustness 检查。
+同 P 对比是在回答“remote reuse 的收益是否超过 transfer cost”，不是为了证明 Shared 一定赢。24 个 cell 的最差档都是 STRICT（4,780 条）。P=2 时，Local 3,701 条按时，Shared 3,866 条按时，即多 165 条；queue backlog p95 从 12,615.42 降到 11,446.36 work（－9.27%），与拥塞点有帮助一致。P=3 时，Shared 4,485／4,780＝93.83% 反而低于 Local 4,504／4,780＝94.23%，直接造成 94% floor 下 Shared 多用 1 P；机制根因待验证。P=4 时，按时率只从 95.82% 升到 95.90%，queue backlog p95 反而从 2,436.54 升到 2,445.12 work（＋0.35%），收益接近零。当前 tenant／tier 只使用一组 deterministic hash assignment，threshold frontier 尚未经过换 seed robustness 检查。逐 tier 整数列将在正在重跑的 `m12-sizing-v2.1` artifact 中发布，重跑完成前这些计数只可由 minimum ratio 与三个 tier 分母交叉复算。
 
 ## 7. 可以说／不能说
 
-可以说：在这份 trace 和 frozen normalized model 内，shared KVS 改善同 P 的最差 tier attainment 与 queue，并在部分 floor band 转成少 1 个 P；完整 threshold frontier 可复现。
+可以说：在这份 trace 和 frozen normalized model 内，Shared KVS 在 P=2 拥塞点改善最差 tier attainment 与 queue；仅 78%～80% floor band 少 1 个 P，94%／96% 反而多 1 个 P。完整 threshold frontier 可复现。
 
 不能说：真实 GPU 节省、真实 QPS／MFU、production TTFT、Global KVS 容量已经足够、transfer price 已经证明鲁棒。下一步必须做 KVS-only price sweep、COMPUTE／MEMORY regime sizing、hardware calibration 和有限容量 eviction。
