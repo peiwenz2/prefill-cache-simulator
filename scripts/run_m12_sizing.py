@@ -38,7 +38,7 @@ from scripts.run_m12_placement import (  # noqa: E402
     build_trace_workload,
 )
 
-SCHEMA_VERSION = "m12-sizing-v2"
+SCHEMA_VERSION = "m12-sizing-v2.1"
 DEFAULT_P_COUNTS = tuple(range(1, 9))
 DEFAULT_TOPOLOGIES = tuple(SizingTopology)
 BASELINE_GATES = SizingGates(1.0, 0.80, 0.90, 20_000.0, 1_000_000.0)
@@ -50,6 +50,9 @@ RESULT_FIELDS = (
     "p_count",
     "completion_ratio",
     "minimum_tier_slo_attainment",
+    "strict_slo_attainment",
+    "standard_slo_attainment",
+    "relaxed_slo_attainment",
     "jain_fairness",
     "p_queue_p95_work",
     "kvs_bytes_per_work",
@@ -323,6 +326,9 @@ def _record_row(
         "p_count": record.cell.p_count,
         "completion_ratio": observation.completion_ratio,
         "minimum_tier_slo_attainment": observation.minimum_tier_slo_attainment,
+        "strict_slo_attainment": record.per_tier_slo_attainment["STRICT"],
+        "standard_slo_attainment": record.per_tier_slo_attainment["STANDARD"],
+        "relaxed_slo_attainment": record.per_tier_slo_attainment["RELAXED"],
         "jain_fairness": observation.jain_fairness,
         "p_queue_p95_work": observation.p_queue_p95_work,
         "kvs_bytes_per_work": observation.kvs_bytes_per_work,

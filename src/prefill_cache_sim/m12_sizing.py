@@ -133,7 +133,30 @@ class SizingRunRecord:
     recompute_tokens: int
     p_normalized_utilization: float
     normalized_kvs_work: float
+    per_tier_slo_attainment: Mapping[str, float]
     decision_fingerprint: str
+
+    def __post_init__(self) -> None:
+        tiers = dict(self.per_tier_slo_attainment)
+        if not tiers:
+            raise ValueError("per-tier SLO attainment must not be empty")
+        if any(
+            not tier or not _finite(value) or not 0 <= value <= 1
+            for tier, value in tiers.items()
+        ):
+            raise ValueError("per-tier SLO attainment must contain valid ratios")
+        if not math.isclose(
+            min(tiers.values()),
+            self.cell.observation.minimum_tier_slo_attainment,
+            rel_tol=0,
+            abs_tol=1e-12,
+        ):
+            raise ValueError("minimum tier must equal the minimum per-tier ratio")
+        object.__setattr__(
+            self,
+            "per_tier_slo_attainment",
+            MappingProxyType(tiers),
+        )
 
 
 def run_sizing_cell(
@@ -216,6 +239,7 @@ def run_sizing_cell(
         report.uncached_tokens,
         result.metrics.prefill_normalized_utilization,
         result.metrics.kvs_normalized_work,
+        result.metrics.per_tier_slo_attainment,
         _decision_fingerprint(policy),
     )
 

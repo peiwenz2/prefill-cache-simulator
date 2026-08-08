@@ -43,6 +43,7 @@ def record(
         15,
         0.7,
         0.2,
+        {"STRICT": 0.9, "STANDARD": 0.95, "RELAXED": 0.99},
         hashlib.sha256(f"{topology}-{p_count}".encode()).hexdigest(),
     )
 
@@ -126,11 +127,15 @@ def test_artifacts_are_deterministic_and_exclude_zero_price_control_from_winner(
     assert provenance["record_count"] == 23_608
     assert provenance["sizing_cell_count"] == len(records)
     contract = json.loads(first["contract.json"])
-    assert contract["schema_version"] == "m12-sizing-v2"
+    assert contract["schema_version"] == "m12-sizing-v2.1"
     assert contract["service_costs"]["prefill_token_work"] == 0.06
     assert contract["service_costs"]["decode_token_work"] == 1.0
     assert contract["service_costs"]["kvs_token_work"] == 0.01
     assert contract["service_costs"]["kvs_bytes_per_token"] == 65_536
+    cells = list(csv.DictReader(io.StringIO(first["cells.csv"].decode())))
+    assert cells[0]["strict_slo_attainment"] == "0.9"
+    assert cells[0]["standard_slo_attainment"] == "0.95"
+    assert cells[0]["relaxed_slo_attainment"] == "0.99"
     frontier_text = first["threshold-frontier.csv"].decode()
     frontier = list(csv.DictReader(io.StringIO(frontier_text)))
     assert len(frontier) == 29 * 3

@@ -477,20 +477,27 @@ S3 的 54.01% 距无限单池 token ceiling 57.07% 约 3.06 pp，但有限多节
 | Arrival、input／output length、512-token chained hashes | 是 | 23,608 requests | 真实 workload shape；没有 token 内容 |
 | Tenant | 否 | request_id SHA-256 → 16 个 synthetic tenants | 只用于检查是否饿死某组流量 |
 | Service tier | 否 | STRICT 20%／STANDARD 60%／RELAXED 20% | 与真实客户等级无关 |
-| SLO budget | 否 | 5,000／20,000／100,000 normalized work | 不是 TTFT ms，也不是线上承诺 |
-| P／D／KVS cost | 否 | MIXED：0.0568／1.0／1.5e-7；64KiB／token | frozen model，尚未 hardware calibration |
+| SLO budget | 否 | STRICT 5,000／STANDARD 20,000／RELAXED 100,000 work-time | 每条 request 从 arrival 到完整完成的 synthetic deadline；不是 1s／1.5s／2s |
+| SLO attainment | 否 | 每个 tier 的按时完成数÷该 tier offered 数 | 例如 80% 是“100 条里至少 80 条按时完成”，不是 800ms |
+| P／D／KVS cost | 否 | MIXED：recompute 0.06／remote fetch 0.01／Decode 1.00 work per token | 都是容易解释的 frozen assumption，尚未 hardware calibration |
+| KVS bytes | 否 | 65,536 bytes／token | 只计算 modeled network traffic；不再由 bytes 反推 work price |
 
 一条 request 的计算口径是：
 
 ```text
-uncached = input − local_hit − remote_hit
-P_work   = uncached × 0.0568
-KVS_work = remote_hit × 65,536 × 1.5e−7
-D_work   = output × 1.0
-strict success = 完整输出且 finish_work − arrival_work ≤ tier_budget
+uncached_tokens = input_tokens − local_hit_tokens − remote_hit_tokens
+P_work          = uncached_tokens × 0.06 work/token
+KVS_work        = remote_hit_tokens × 0.01 work/token
+KVS_bytes       = remote_hit_tokens × 65,536 bytes/token
+D_work          = output_tokens × 1.00 work/token
+request_slo_met = 完整输出且 finish_work_time − arrival_work_time ≤ tier_deadline_work
 ```
 
-Input length 不固定，直接使用 trace 中每条 request 的长度。等待时间计入 `finish−arrival`，所以“最终都跑完”不等于 SLO 通过。Fully-cold 时只有 28／4,780 条 STRICT request 自身 work 超过 budget；P=1 的 minimum-tier=0 主要来自 queue collapse，不是请求天然不可完成。
+这里先把 Decode 1 token 的 modeled cost **定义为 1 work**，作为统一尺子。于是 MIXED world 中：local hit 不做 Prefill 或传输，增量成本记为 0；remote fetch 1 token 记为 0.01 work；完全 miss 后重算 1 token 记为 0.06 work；Decode 1 token 记为 1 work。`0.01` 与 `0.06` 都是人为 scenario 参数，不是 Mooncake 论文、trace 或 GPU benchmark 测出来的数字。
+
+`work` 与 `work-time` 要分开读：work 是工作量；kernel 让每个 P 在 1 个 work-time 内处理 1 work，因此 queue 会把 finish work-time 往后推。Raw trace 的 `timestamp_ms` 数值被放进 arrival 轴，但这**不等于证明 1 work-time＝1ms**。因此当前只能写 STRICT deadline＝5,000 work-time，不能诚实地把它写成 1s。要得到 1s／1.5s／2s，必须先在目标 GPU／model／batch／KVS 链路上测出 `service_rate_work_per_ms`，再换算：`deadline_work = deadline_ms × service_rate_work_per_ms`。
+
+Input length 不固定，直接使用 trace 中每条 request 的长度。等待时间计入 `finish−arrival`，所以“最终都跑完”不等于 SLO 通过。`minimum-tier attainment` 的算法是：分别计算 STRICT、STANDARD、RELAXED 的 `按时完整完成 request 数÷offered request 数`，再取三者最小值。它回答“最差服务等级有多少请求按时完成”，不是一个 latency 数值。
 
 ### 5.2 54 个 cell 是什么
 
@@ -514,26 +521,33 @@ Resource sizing 回答：在 completion、SLO、公平性和 queue 都过线时�
 | Gate | Threshold | 白话含义 | 本次哪里 binding |
 |---|---:|---|---|
 | Completion | 100% | Horizon 内全部 request 完成 | 24 cells 全通过 |
-| Minimum-tier SLO attainment | 80%；95% sensitivity | 三档里最差一档的按时完成比例 | P≥2 后唯一决定 N* |
+| Tier deadline | 5,000／20,000／100,000 work-time | STRICT／STANDARD／RELAXED 每条 request 的 synthetic completion deadline | 决定每条 request 是否按时 |
+| Minimum-tier SLO attainment | ≥80%；≥95% sensitivity | 三档分别算达标率后取最小值；80% 表示最差 tier 也至少 80% 按时 | P≥2 后决定 N* |
 | Jain fairness | ≥0.90 | 16 个 synthetic tenants 的 token service ratio 是否接近 | 只在 P=1 失败 |
 | P queue p95 | ≤20,000 work | 95% 决策点看到的 P backlog；不是 ms | 只在 P=1 失败 |
 | KVS bytes／work | ≤1,000,000 | Remote transfer guardrail；不是真实 GB／s | 从未接近上限 |
 
 P=1 虽然 completion=100%，但 minimum-tier=0、Jain=0.7388、queue p95=3,201,033，因此“让请求无限排队，最后跑完”仍不及格。
 
-| Minimum-tier floor | Local-only N* | Shared KVS N* | Zero-price N* | 怎么读 |
+| 最差 tier 必须达到的按时率 | Local-only N* | Shared KVS N* | Zero-price N* | 怎么读 |
 |---:|---:|---:|---:|---|
 | 75% | 2 | 2 | 2 | 无差异 |
-| 80% | 2 | 2 | 2 | 旧 3→2 撤回 |
-| 83%／85% | 3 | **2** | 2 | Shared 少 1 P |
-| 86%／90% | 3 | 3 | 3 | 差异消失 |
-| 95% | 4 | 4 | 4 | 旧 7→4 撤回 |
-| 96% | 5 | **4** | 5 | Shared 少 1 P |
+| 78%～80% | 3 | **2** | 2 | 只有这段门槛，Shared 在本次 v1.2 run 少 1 个 P |
+| 81%～93% | 3 | 3 | 81%～82% 时 zero-price 为 2，其余为 3 | priced Shared 与 Local 无资源差异 |
+| 94% | 3 | 4 | 3 | Shared 反而多 1 个 P，说明 transfer／routing 可能抵消 reuse；根因尚未验证 |
+| 95% | 4 | 4 | 4 | 严格门槛无资源差异 |
+| 96% | 5 | 6 | 5 | Shared 反而多 1 个 P；禁止把 78%～80% 的收益外推 |
 | 97% | ＞8 | ＞8 | ＞8 | Grid exhausted；禁止外推 |
 
-同 P=2 时，Shared 把 minimum-tier 从 0.8197 提到 0.8508（＋3.12pp），queue p95 从 9,950.74 降到 9,032.79（－9.22%），token hit 增加 2.22pp。同 P=4 时，minimum-tier ＋0.33pp，queue p95 －0.58%。稳定结论是 Shared KVS 改善同 P 的 tail service quality；能否少一台 P 取决于业务选择的 SLO floor，不能再包装成固定 33.3%／42.9% 节省。
+这些同 P 对比不是为了证明 Shared 一定赢，而是隔离资源数量后回答“remote reuse 的收益有没有超过 transfer cost”。v1.2 的结果是：
 
-代码与证据：`src/prefill_cache_sim/m12_sizing.py`、`scripts/run_m12_sizing.py`、`results/m12-sizing/{contract,cells,threshold-frontier,verdict,provenance,MANIFEST}`。
+- P=2：Local 最差 tier 为 77.43%，Shared 为 80.88%，即每 100 个最差 tier request 约多 3.45 个按时完成；queue p95 从 12,615.42 降到 11,446.36 work-time（－9.27%）；token hit 从 54.62% 升到 56.80%（＋2.18pp）。这说明在拥塞点有帮助。
+- P=4：Local 最差 tier 为 95.82%，Shared 为 95.90%，只增加 0.08pp；queue p95 从 2,436.54 升到 2,445.12 work-time（＋0.35%）。这说明资源较充足时收益接近零，queue 还略差。
+- P=2 Shared 的 9,105,525 remote tokens 产生 `9,105,525×0.01＝91,055.25 KVS work`，并记录 `9,105,525×65,536＝596.74GB` 十进制 modeled traffic。两个量分别用于成本账和流量账，不能相加，也不能当实测 GB／s。
+
+因此可证明的只有一个窄结论：在当前 MIXED v1.2、synthetic tenant／SLO 与 P=2 拥塞点，Shared KVS 让更多最差 tier request 按时完成；它没有证明 production 节省 GPU，也没有证明所有 SLO floor 都更好。
+
+代码与证据：`src/prefill_cache_sim/m12_sizing.py`、`scripts/run_m12_sizing.py`、`results/m12-sizing-v1.2/{contract,cells,threshold-frontier,verdict,provenance,MANIFEST}`。GitHub main 已备份到 commit `16ffff9`。
 
 ### 5.4 大规模 distributed PD 的当前选择
 
@@ -564,5 +578,5 @@ P=1 虽然 completion=100%，但 minimum-tier=0、Jain=0.7388、queue p95=3,201,
 | Cooperative preemption | `src/prefill_cache_sim/preemption.py:95-229` |
 | M4 selector results | `results/m4/summary.json` |
 | M5–M10 artifacts | `results/m5/`～`results/m10-synthetic/` |
-| M12 resource sizing | `results/m12-sizing/` |
+| M12 resource sizing v1.2 | `results/m12-sizing-v1.2/` |
 | 生产接入边界 | `docs/m11-production-rfc.md` |

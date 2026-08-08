@@ -46,36 +46,38 @@ arrival
 
 ```text
 uncached_tokens = input_tokens - local_hit_tokens - remote_hit_tokens
-P_work   = uncached_tokens × 0.0568
-KVS_work = remote_hit_tokens × 65,536 bytes/token × 1.5e-7 work/byte
-         = remote_hit_tokens × 0.0098304
-D_work   = output_tokens × 1.0
+P_work   = uncached_tokens × 0.06 work/token
+KVS_work = remote_hit_tokens × 0.01 work/token
+KVS_bytes = remote_hit_tokens × 65,536 bytes/token
+D_work   = output_tokens × 1.00 work/token
 
-strict_success = completed_full_output
-                 AND finish_work - arrival_work <= tier_budget
+request_slo_met = completed_full_output
+                  AND finish_work_time - arrival_work_time <= tier_deadline_work
 ```
 
 真实例子：trace request `...00001829` 的 input=6,509、output=30，共 13 个 cacheable blocks，最后一块 365 tokens，synthetic tier=STANDARD，budget=20,000。
 
 | 路径 | P／KVS work | 加上 Decode 后，不含 queue |
 |---|---:|---:|
-| 前 10 blocks local hit | `1,389×0.0568＝78.90` | 108.90 |
-| 前 10 blocks remote fetch | `1,389×0.0568＋5,120×0.0098304＝129.23` | 159.23 |
-| 完全 location miss，全部重算 | `6,509×0.0568＝369.71` | 399.71 |
+| 前 10 blocks local hit | `1,389×0.06＝83.34` | 113.34 |
+| 前 10 blocks remote fetch | `1,389×0.06＋5,120×0.01＝134.54` | 164.54 |
+| 完全 location miss，全部重算 | `6,509×0.06＝390.54` | 420.54 |
 
-结论不是“remote 永远最好”：local hit 最便宜。当前 frozen price 里，同一个被 fetch token 的 remote 单价是 `65,536×1.5e−7＝0.0098304 work`，recompute 单价是 `0.0568 work`，所以只对 fetched portion 而言约便宜 5.78 倍；整条 request 还包含未命中的 1,389 tokens 和 Decode，不能直接套 5.78 倍。
+结论不是“remote 永远最好”：local hit 最便宜。当前 frozen price 里，同一个 token 的 remote fetch 单价被定义为 `0.01 work`，recompute 单价被定义为 `0.06 work`，所以只对 fetched portion 而言便宜 6 倍。这个 6 倍是 scenario assumption，不是实验测出的收益；整条 request 还包含未命中的 1,389 tokens、queue 与 Decode，不能直接套 6 倍。
 
 ## 4. SLO 是什么
 
 Mooncake trace 没有 tenant、tier、SLO 或真实 latency。当前实验按 request_id 的 SHA-256 确定性生成：16 个 synthetic tenants；20% STRICT、60% STANDARD、20% RELAXED。
 
-`1 normalized work` 定义为 Decode 1 token 的 modeled service cost；arrival 把 raw trace timestamp_ms 的数值 1:1 放到同一坐标轴，但这不代表真实硬件已经证明 `1 work＝1ms`。Queue ceiling=20,000 与 STANDARD budget=20,000 数值相同也是人为 contract 选择，不是数据集推导出的物理常数。
+`1 normalized work` 定义为 Decode 1 token 的 modeled service cost；它是工作量单位。Kernel 里每个 P 每个 work-time 处理 1 work，因此 work-time 是 synthetic 时间单位。Arrival 把 raw trace timestamp_ms 的数值放到这个坐标轴，但这不代表真实硬件已经证明 `1 work-time＝1ms`。Queue ceiling=20,000 与 STANDARD budget=20,000 数值相同也是人为 contract 选择，不是数据集推导出的物理常数。
 
-| Tier | Request 数 | Synthetic deadline budget |
+| Tier | Request 数 | 每条 request 的 synthetic completion deadline | 能否写成秒 |
 |---|---:|---:|
-| STRICT | 4,780 | 5,000 normalized work |
-| STANDARD | 14,105 | 20,000 normalized work |
-| RELAXED | 4,723 | 100,000 normalized work |
+| STRICT | 4,780 | 5,000 work-time | 不能；缺 hardware calibration |
+| STANDARD | 14,105 | 20,000 work-time | 不能；缺 hardware calibration |
+| RELAXED | 4,723 | 100,000 work-time | 不能；缺 hardware calibration |
+
+如果老板希望看 1s／1.5s／2s，正确做法不是改表头，而是先对目标 GPU 测出 `service_rate_work_per_ms`，然后用 `deadline_work=deadline_ms×service_rate_work_per_ms` 重跑。比如测得 8 work／ms 时，1s deadline 才能换成 8,000 work-time。当前 M9-HW 没有完成，所以报告保留具体的 synthetic deadline，并明确不冒充秒。
 
 Input length 会改变 P work，但不会改变 tier deadline；tier 与长度独立。Fully-cold 下只有 28／4,780 条 STRICT request 自身 token work 已超过 5,000，占 0.59%；decode-only 不可达的是 0 条。因此 P=1 的 STRICT attainment=0 主要是 queue collapse，不是长请求天然无解。
 
@@ -116,7 +118,8 @@ Gate：
 | Gate | Threshold | 来源 | 实际是否 binding |
 |---|---:|---|---|
 | Completion | 100% | 人为 quality floor | 含 drain window，24 cells 全部通过 |
-| Minimum tier attainment | 80%；95% sensitivity | 人为 synthetic floor | P≥2 后唯一决定 N* 的 gate |
+| Tier deadline | 5,000／20,000／100,000 work-time | 人为 synthetic completion SLO | 决定每条 request 是否按时 |
+| Minimum tier attainment | 80%；95% sensitivity | 三个 tier 分别算 `按时完成数÷offered 数` 后取最小值 | P≥2 后决定 N* |
 | Jain fairness | ≥0.90 | 人为 fairness floor | 只在 P=1 失败 |
 | P queue p95 | ≤20,000 work | 人为 operability guardrail | 只在 P=1 失败 |
 | KVS bytes／work | ≤1,000,000 | 人为 transfer guardrail | 全 grid 最大为 ceiling 的 36.24% |
@@ -125,19 +128,19 @@ Gate：
 
 隔离 routing 后的最终 N*：
 
-| Minimum-tier floor | Local-only | Shared KVS | Zero-transfer control | 结论 |
+| 最差 tier 必须达到的按时率 | Local-only | Shared KVS | Zero-transfer control | 结论 |
 |---:|---:|---:|---:|---|
 | 75% | 2 | 2 | 2 | 无资源差异 |
-| 80% | 2 | 2 | 2 | 旧 `3→2` 撤回 |
-| 81% | 2 | 2 | 2 | 尚未跨过 local P=2 的 81.97% attainment |
-| 82%～85% | 3 | 2 | 2 | 这一 narrow floor band 少 1 P |
-| 86% | 3 | 3 | 3 | 差异消失 |
+| 78%～80% | 3 | 2 | 2 | v1.2 中 priced Shared 只在这段门槛少 1 P |
+| 81%～82% | 3 | 3 | 2 | priced Shared 与 Local 相同；zero-price 仍为 2 |
+| 83%～93% | 3 | 3 | 3 | 无资源差异 |
+| 94% | 3 | 4 | 3 | priced Shared 反而多 1 P，根因待验证 |
 | 90% | 3 | 3 | 3 | 无资源差异 |
 | 95% | 4 | 4 | 4 | 旧 `7→4` 撤回 |
-| 96% | 5 | 4 | 5 | Shared 在该 floor 少 1 P；zero-price 结果与不同 hit mix／routing 行为一致，但未完成根因验证 |
+| 96% | 5 | 6 | 5 | priced Shared 反而多 1 P；禁止从局部门槛外推 |
 | 97% | P≤8 内不可行 | P≤8 内不可行 | P≤8 内不可行 | Grid exhausted，不能外推 |
 
-同 P 的稳定方向仍有价值：P=2 时 shared 把 minimum tier 从 0.8197 提到 0.8508（用未四舍五入原值计算为＋3.12pp），queue p95 从 9,950.74 降到 9,032.79（－9.22%）；P=4 时 minimum tier ＋0.33pp，queue p95 －0.58%。但“是否少一台 P”高度依赖人为 floor，不能只报 33.3%／42.9%。当前 tenant／tier 只使用一组 deterministic hash assignment；82%～85% 和 96% 的 narrow band 尚未经过换 seed robustness 检查。Zero-price 只把 transfer price 设为 0，不是理论上界；它仍会改变 routing／hit mix，所以 96% 时可以比 priced shared 更差。
+同 P 对比是在回答“remote reuse 的收益是否超过 transfer cost”，不是为了证明 Shared 一定赢。P=2 时，最差 tier 按时率从 77.43% 升到 80.88%（＋3.45pp），queue p95 从 12,615.42 降到 11,446.36 work-time（－9.27%），说明拥塞点有帮助。P=4 时，按时率只从 95.82% 升到 95.90%（＋0.08pp），queue p95 反而从 2,436.54 升到 2,445.12（＋0.35%），说明资源较充足时收益接近零。当前 tenant／tier 只使用一组 deterministic hash assignment，threshold frontier 尚未经过换 seed robustness 检查。
 
 ## 7. 可以说／不能说
 

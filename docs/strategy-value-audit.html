@@ -1204,7 +1204,7 @@ score = load(node) + request.input_tokens - cache_discount * hit
               <tr><td>旧 snapshot 到底旧什么？</td><td>旧的是 selector 的观察。执行时真正 cache lookup 仍用当时 resident state；不会把旧 view 当成真实 hit。</td><td><code>simulator.py:227-266</code></td></tr>
               <tr><td>Cache 什么时候写入？</td><td>请求 prefill 完成后才写。并发中的相同 prefix 不会提前计 hit。</td><td><code>CacheVisibility.INSERT_AT_COMPLETION</code></td></tr>
               <tr><td>Block 活多久？</td><td>没有固定 lifetime。未满时留到模拟结束；满了按 LRU capacity pressure 淘汰。</td><td><code>cache.py:106-151</code></td></tr>
-              <tr><td>Queue p95 是 3,103ms 吗？</td><td>不是。M4 是 normalized token-work；只能比较大小，不能当 production latency。</td><td><code>prefill_uncached_token_ms=0.0568</code> 是 synthetic coefficient</td></tr>
+              <tr><td>Queue p95 是 3,103ms 吗？</td><td>不是。M4 是 normalized token-work；只能比较大小，不能当 production latency。</td><td><code>prefill_uncached_token_ms</code> 是历史字段名；当前 MIXED recompute price 是 synthetic 0.06 work／token</td></tr>
             </tbody>
           </table>
           <div class="call warn">
@@ -1517,7 +1517,7 @@ score_ms = (queue_tokens + uncached) × prefill_uncached_token_ms</pre
             后可以直接替换。 M4 hit=53.37%、load max／mean=1.269，但 queue p95
             仍为 6393。 它改善了 score 的可标定性，没有修复输入 freshness。
           </p>
-          <div class="call warn"><div class="label">名字里有 Calibrated，不代表已硬件校准</div>M4 使用 <code>0.0568 normalized ms／uncached token</code>，它是 synthetic service coefficient。只有 M9-HW 用真实 engine 测出 prefill／KVT／overlap 后，score 才能称为 hardware-calibrated TTFT。</div>
+          <div class="call warn"><div class="label">名字里有 Calibrated，不代表已硬件校准</div>M4／M12 使用 synthetic service coefficient；当前 MIXED recompute price 是 <code>0.06 work／uncached token</code>。只有 M9-HW 用真实 engine 测出 prefill／KVT／overlap 后，score 才能称为 hardware-calibrated TTFT。</div>
           <h3>2.1.6 M4 与 M12：同名策略不可直接横比</h3>
           <table>
             <thead>
@@ -2100,15 +2100,17 @@ if move_score - keep_score &gt; safety_margin: abort_self
 
         <section id="rollout">
           <h2><span class="n">5</span>老板版验收：先把实验世界讲清楚</h2>
-          <div class="call bad"><div class="label">老板可以直接复述的结论</div><ul><li>旧结果写成 local 3→shared 2、local 7→shared 4，但当时两组 routing 不同，因此该资源节省 headline 已撤回。</li><li>隔离 routing 后，在人为设置的 80%／95% 两条及格线上，Shared KVS 都没有减少 P 数：分别都是 2 P／4 P。</li><li>稳定收益是同样 P 数下改善最差 tier 与 queue；只有当及格线恰好落在 82%～85% 或 96% 的窄区间时，当前 deterministic draw 才少 1 P。</li></ul></div>
+          <div class="call bad"><div class="label">老板可以直接复述的结论</div><ul><li>当前全部结果仍是 normalized simulation，没有硬件校准，不能报 production 秒数或 GPU 节省。</li><li>v1.2 中 Shared KVS 在 P=2 拥塞点把最差 tier 按时率从 77.43% 提到 80.88%，queue p95 降 9.27%。</li><li>P=4 时按时率只多 0.08pp，queue 反而差 0.35%；94%／96% floor 还会多用 1 个 P。</li><li>因此只能说“局部拥塞点有帮助”，不能说“稳定省 P”。</li></ul></div>
 
           <h3>5.1 Trace 给了什么，我们人为补了什么</h3>
           <table><thead><tr><th>Quantity</th><th>Trace 原生？</th><th>来源／取值</th><th>怎么理解</th></tr></thead><tbody>
             <tr><td>Arrival、input／output length、512-token chained hashes</td><td class="best">是</td><td>23,608 requests；timestamp 0～3,600,000ms</td><td>真实 workload shape；没有 token 内容</td></tr>
             <tr><td>Tenant</td><td class="risk">否</td><td>request_id SHA-256 → 16 个 synthetic tenants</td><td>只用于检查是否饿死某组流量</td></tr>
             <tr><td>Service tier</td><td class="risk">否</td><td>STRICT 20%／STANDARD 60%／RELAXED 20%</td><td>与 input length、真实客户等级无关</td></tr>
-            <tr><td>SLO deadline</td><td class="risk">否</td><td>5,000／20,000／100,000 normalized work</td><td>不是 TTFT ms，也不是线上承诺</td></tr>
-            <tr><td>P／D／KVS cost</td><td class="risk">否</td><td>MIXED：0.0568／1.0／1.5e-7；64KiB／token</td><td>人为 frozen price；未做 hardware calibration</td></tr>
+            <tr><td>SLO deadline</td><td class="risk">否</td><td>5,000／20,000／100,000 work-time</td><td>每条 request 的 synthetic completion deadline；不是 1s／1.5s／2s</td></tr>
+            <tr><td>SLO attainment</td><td class="risk">否</td><td>按时完整完成数÷该 tier offered 数</td><td>80% 是比例，不是 800ms</td></tr>
+            <tr><td>P／D／KVS cost</td><td class="risk">否</td><td>MIXED：recompute 0.06／remote 0.01／Decode 1.00 work per token</td><td>人为 frozen price；未做 hardware calibration</td></tr>
+            <tr><td>KVS bytes</td><td class="risk">否</td><td>65,536 bytes／token</td><td>只记 modeled traffic；不再从 bytes 反推 work price</td></tr>
             <tr><td>Cache capacity</td><td class="risk">否</td><td>sizing 中足以容纳全部 unique keys</td><td>故意关闭 eviction，只隔离 KVS topology</td></tr>
           </tbody></table>
           <div class="call warn"><div class="label">一句话边界</div>这一章证明的是同一套 normalized assumptions 下的相对排序和 failure mechanism，不是生产 GPU 数、毫秒、QPS、MFU 或采购建议。</div>
@@ -2121,17 +2123,18 @@ if move_score - keep_score &gt; safety_margin: abort_self
             <g stroke="#64748b" stroke-width="2" marker-end="url(#req-arrow)"><line x1="135" y1="88" x2="170" y2="88"/><line x1="300" y1="88" x2="335" y2="88"/><line x1="475" y1="88" x2="510" y2="88"/><line x1="645" y1="88" x2="680" y2="88"/><line x1="800" y1="88" x2="835" y2="88"/></g>
             <text x="490" y="157" text-anchor="middle" font-size="15" fill="#b45309">strict success：完整输出，且 finish_work − arrival_work ≤ tier_budget</text>
           </svg>
-          <div class="grid2"><div class="card"><div class="label">核心公式</div><pre>uncached = input − local_hit − remote_hit<br>P_work   = uncached × 0.0568<br>KVS_work = remote_hit × 65,536 × 1.5e−7<br>D_work   = output × 1.0</pre></div><div class="card"><div class="label">SLO 与 input length</div><ul><li>Input length 不固定；使用 trace 每条 request 的真实长度。</li><li>长度直接增加 P work，但不会自动放宽 tier budget。</li><li>Fully-cold 时只有 28／4,780 条 STRICT request 自身 work 超过 budget，占 0.59%；P=1 的 tier=0 主要是 queue collapse。</li></ul></div></div>
+          <div class="grid2"><div class="card"><div class="label">核心公式</div><pre>uncached = input − local_hit − remote_hit<br>P_work   = uncached × 0.06<br>KVS_work = remote_hit × 0.01<br>KVS_bytes = remote_hit × 65,536<br>D_work   = output × 1.00</pre></div><div class="card"><div class="label">先定义同一把尺子</div><ul><li>Decode 1 token＝1 work。</li><li>Local hit 1 token＝0 incremental work。</li><li>Remote fetch 1 token＝0.01 work。</li><li>Miss 后重算 1 token＝0.06 work。</li><li>0.01／0.06 是 assumption，不是 benchmark result。</li></ul></div></div>
+          <div class="call warn"><div class="label">为什么当前不写 1s／1.5s／2s</div><ul><li><code>work</code> 是工作量；<code>work-time</code> 是 synthetic 时间轴。</li><li>Raw trace timestamp 的数值进入 arrival 轴，不代表已经证明 1 work-time＝1ms。</li><li>真实秒数需要目标 GPU 的 <code>service_rate_work_per_ms</code>：<code>deadline_work＝deadline_ms×service_rate_work_per_ms</code>。</li><li>M9-HW 尚未完成，所以直接把 5,000 work-time 改写成秒会误导。</li></ul></div>
           <div class="call"><div class="label">Normalized work 到底是什么单位</div><ul><li>以 Decode 1 token 的 modeled service cost 定义 1 work；这只是统一比较 P／D／KVS 的记账尺。</li><li>Arrival 使用 raw trace timestamp_ms，数值 1:1 放到同一坐标轴；这不代表 1 work 已经被真实硬件证明等于 1ms。</li><li>Queue ceiling=20,000 与 STANDARD budget=20,000 数值相同，是人为 contract 选择，不是数据集推导出的物理常数。</li></ul></div>
 
           <h3>5.2.1 用 trace 中一条真实 request 算一遍</h3>
           <p>Request <code>...00001829</code>：input=6,509、output=30，共 13 个 cacheable blocks，最后一块 365 tokens；synthetic tier=STANDARD，budget=20,000。</p>
           <table><thead><tr><th>路径</th><th>Prefill／KVS 公式</th><th>加 Decode，不含 queue</th><th>意义</th></tr></thead><tbody>
-            <tr><td>前 10 blocks local hit</td><td>1,389×0.0568＝78.90</td><td><strong>108.90</strong></td><td>Local hit 最便宜</td></tr>
-            <tr><td>前 10 blocks remote fetch</td><td>1,389×0.0568＋5,120×0.0098304＝129.23</td><td>159.23</td><td>比 local hit 贵，但比全部重算便宜</td></tr>
-            <tr><td>完全 location miss</td><td>6,509×0.0568＝369.71</td><td>399.71</td><td>全部重算；没有 remote transfer</td></tr>
+            <tr><td>前 10 blocks local hit</td><td>1,389×0.06＝83.34</td><td><strong>113.34</strong></td><td>Local hit 最便宜</td></tr>
+            <tr><td>前 10 blocks remote fetch</td><td>1,389×0.06＋5,120×0.01＝134.54</td><td>164.54</td><td>比 local hit 贵，但比全部重算便宜</td></tr>
+            <tr><td>完全 location miss</td><td>6,509×0.06＝390.54</td><td>420.54</td><td>全部重算；没有 remote transfer</td></tr>
           </tbody></table>
-          <p class="fine">5.78× 只比较同一个 fetched token 的 frozen 单价：remote＝0.0098304 work，recompute＝0.0568 work。整条 request 还包含未命中 tokens 与 Decode，不能直接套这个倍数。</p>
+          <p class="fine">6× 只比较同一个 fetched token 的 frozen 单价：remote＝0.01 work，recompute＝0.06 work。它是 scenario assumption，不是测出来的收益；整条 request 还包含未命中 tokens、queue 与 Decode，不能直接套这个倍数。</p>
 
           <h3>5.3 “54 个 cell”＝54 次完整 trace replay</h3>
           <div class="call"><div class="label">Cell 的白话定义</div>固定 node、cost、arrival pressure 和 policy，从空 cache 开始，把 23,608 条 request 全部确定性重放一遍。一个 cell 不是一条 request，也不是一个 unit test。</div>
@@ -2156,7 +2159,8 @@ if move_score - keep_score &gt; safety_margin: abort_self
           <h3>5.4.1 五条 gate 到底拦什么</h3>
           <table><thead><tr><th>Gate</th><th>Threshold</th><th>大白话</th><th>本次哪里 binding</th></tr></thead><tbody>
             <tr><td>Completion</td><td>100%</td><td>含 trace 结束后的 drain window，所有 offered requests 最终完成</td><td>24 cells 全部通过</td></tr>
-            <tr><td>Minimum-tier SLO attainment</td><td>80%；95% sensitivity</td><td>三档里最差一档的按时完成 request 比例</td><td><strong>P≥2 后唯一决定 N*</strong></td></tr>
+            <tr><td>Tier deadline</td><td>5,000／20,000／100,000 work-time</td><td>每条 STRICT／STANDARD／RELAXED request 的 synthetic completion SLO</td><td>决定单个 request 是否按时</td></tr>
+            <tr><td>Minimum-tier SLO attainment</td><td>≥80%；≥95% sensitivity</td><td>三个 tier 分别算按时率后取最小值</td><td><strong>80% 是比例，不是 latency</strong></td></tr>
             <tr><td>Jain fairness</td><td>≥0.90</td><td>16 个 synthetic tenants 的 token service ratio 是否接近</td><td>只在 P=1 失败</td></tr>
             <tr><td>P queue p95</td><td>≤20,000 work</td><td>95% decisions 看到的 P backlog；不是 ms</td><td>只在 P=1 失败</td></tr>
             <tr><td>KVS bytes／work</td><td>≤1,000,000</td><td>Remote transfer guardrail；不是真实 GB／s</td><td>全 grid 最大为 ceiling 的 36.24%</td></tr>
@@ -2164,22 +2168,24 @@ if move_score - keep_score &gt; safety_margin: abort_self
           <div class="call"><div class="label">为什么“无限排队、最后都跑完”仍不及格</div><ul><li>P=1 的 completion=100%，没有 request 被丢掉。</li><li>但 minimum tier=0、Jain=0.7388、queue p95=3,201,033。</li><li>等待计入 <code>finish−arrival</code>；最终完成也不能补回 strict SLO credit。</li></ul></div>
 
           <h3>5.4.2 隔离变量后的 staircase</h3>
-          <table><thead><tr><th>Minimum-tier floor</th><th>Local-only N*</th><th>Shared KVS N*</th><th>Zero-price N*</th><th>怎么读</th></tr></thead><tbody>
+          <div class="call"><div class="label">表头到底是什么意思</div><ul><li>先用 tier deadline 判断每条 request 是否按时。</li><li>再按 STRICT／STANDARD／RELAXED 分别计算按时率。</li><li>Minimum-tier 是三个按时率里最小的那个。</li><li>Floor=80% 表示最差 tier 也必须至少 80% 按时；它不是 SLO=80%。</li></ul></div>
+          <table><thead><tr><th>最差 tier 必须达到的按时率</th><th>Local-only N*</th><th>Shared KVS N*</th><th>Zero-price N*</th><th>怎么读</th></tr></thead><tbody>
             <tr><td>75%</td><td>2</td><td>2</td><td>2</td><td>无资源差异</td></tr>
-            <tr class="best"><td>80%</td><td><strong>2</strong></td><td><strong>2</strong></td><td>2</td><td>旧 3→2 撤回</td></tr>
-            <tr><td>81%</td><td>2</td><td>2</td><td>2</td><td>尚未跨过 local P=2 的 81.97% attainment</td></tr>
-            <tr><td>82%～85%</td><td>3</td><td><strong>2</strong></td><td>2</td><td>这一 narrow floor band 少 1 P</td></tr>
-            <tr><td>86%／90%</td><td>3</td><td>3</td><td>3</td><td>差异消失</td></tr>
+            <tr class="best"><td>78%～80%</td><td>3</td><td><strong>2</strong></td><td>2</td><td>v1.2 中 Shared 只在这段门槛少 1 P</td></tr>
+            <tr><td>81%～82%</td><td>3</td><td>3</td><td>2</td><td>priced Shared 与 Local 相同</td></tr>
+            <tr><td>83%～93%</td><td>3</td><td>3</td><td>3</td><td>无资源差异</td></tr>
+            <tr><td>94%</td><td>3</td><td>4</td><td>3</td><td>Shared 反而多 1 P；根因待验证</td></tr>
             <tr class="best"><td>95%</td><td><strong>4</strong></td><td><strong>4</strong></td><td>4</td><td>旧 7→4 撤回</td></tr>
-            <tr><td>96%</td><td>5</td><td><strong>4</strong></td><td>5</td><td>Shared 少 1 P；zero-price 与不同 hit mix／routing 行为一致，根因未验证</td></tr>
+            <tr><td>96%</td><td>5</td><td>6</td><td>5</td><td>Shared 反而多 1 P；禁止局部收益外推</td></tr>
             <tr><td>97%</td><td>P≤8 内不可行</td><td>P≤8 内不可行</td><td>P≤8 内不可行</td><td>Grid exhausted；禁止外推</td></tr>
           </tbody></table>
-          <div class="grid2"><div class="card"><div class="label">同样 P=2</div><ul><li>Minimum tier：0.8197→0.8508，<strong>＋3.12pp</strong>。</li><li>Queue p95：9,950.74→9,032.79，<strong>－9.22%</strong>。</li><li>Token hit：54.58%→56.79%，＋2.22pp。</li><li>pp 差值按未四舍五入原值计算，显示值心算可能相差 0.01pp。</li></ul></div><div class="card"><div class="label">同样 P=4</div><ul><li>Minimum tier：0.9577→0.9611，＋0.33pp。</li><li>Queue p95：2,314.71→2,301.31，－0.58%。</li><li>Remote tokens=12,700,607；modeled transfer=832.35GB／6,000,000 work。</li></ul></div></div>
-          <div class="call warn"><div class="label">最值钱、也最诚实的 insight</div><ul><li>Shared KVS 的稳定价值是减少 location miss penalty，改善同 P 的 tail service quality。</li><li>是否能关掉一台 P，取决于业务选择的 SLO floor；当前 80%／95% 都没有减少 N*。</li><li>82%～85% 与 96% 的少 1 P 只来自一组 deterministic tenant／tier hash assignment；必须换 seed 重跑，不能包装成稳定资源收益。</li><li>Zero-price 只是 transfer price=0 的 control，不是理论上界；它仍会改变 routing／hit mix，所以 96% 时可能比 priced shared 更差。</li></ul></div>
+          <div class="grid2"><div class="card"><div class="label">同样 P=2：拥塞点</div><ul><li>最差 tier 按时率：77.43%→80.88%，<strong>＋3.45pp</strong>。</li><li>Queue p95：12,615.42→11,446.36 work-time，<strong>－9.27%</strong>。</li><li>Token hit：54.62%→56.80%，＋2.18pp。</li><li>白话：最差 tier 每 100 个 request 约多 3.45 个按时完成。</li></ul></div><div class="card"><div class="label">同样 P=4：资源较充足</div><ul><li>最差 tier 按时率：95.82%→95.90%，只＋0.08pp。</li><li>Queue p95：2,436.54→2,445.12 work-time，反而＋0.35%。</li><li>白话：收益已接近零，不能说 Shared 稳定改善 tail。</li></ul></div></div>
+          <div class="call"><div class="label">P=2 的 remote 数字怎么算</div><ul><li>Remote tokens＝9,105,525：来自 replay 中“local miss、但 cluster 其他 P 有 block”的 token 计数。</li><li>KVS work＝9,105,525×0.01＝91,055.25 work。</li><li>Modeled traffic＝9,105,525×65,536＝596.74GB（十进制）。</li><li>它们不是实测 bandwidth，也不能与 queue work 直接相加。</li></ul></div>
+          <div class="call warn"><div class="label">最值钱、也最诚实的 insight</div><ul><li>Shared KVS 在 P=2 拥塞点有帮助；P=4 收益接近零。</li><li>本次只有 78%～80% floor band 少 1 个 P；94%／96% 反而多 1 个 P。</li><li>因此不能宣称稳定资源节省；必须换 tier seed、扫 KVS price，并完成 hardware calibration。</li><li>Zero-price 只是 transfer price=0 的 control，不是理论上界。</li></ul></div>
 
           <h3>5.5 可以说／不能说／下一步</h3>
-          <table><thead><tr><th>可以说</th><th>不能说</th><th>下一步证伪</th></tr></thead><tbody><tr><td>本 trace＋MIXED normalized model 内，shared 改善同 P 的 minimum tier 与 queue；部分 floor band 少 1 P</td><td>真实 GPU 节省、QPS／MFU、production TTFT；zero-price 是理论 upper bound；行业已有无限 Global KVS</td><td>KVS-only price sweep；COMPUTE／MEMORY sizing；有限容量 eviction；M9 hardware calibration；真实 tenant／SLO shadow</td></tr></tbody></table>
-          <p class="fine">可复现证据：<code>results/m12-sizing/cells.csv</code>、<code>threshold-frontier.csv</code>、<code>verdict.json</code>、<code>provenance.json</code>、<code>MANIFEST.json</code>。54-cell 与 24-cell 使用不同 arrival mapping／horizon，数字不可互除或放在同一 ranking。</p>
+          <table><thead><tr><th>可以说</th><th>不能说</th><th>下一步证伪</th></tr></thead><tbody><tr><td>本 trace＋MIXED v1.2 model 内，Shared 在 P=2 拥塞点改善最差 tier 与 queue；仅 78%～80% floor band 少 1 P</td><td>稳定 GPU 节省、QPS／MFU、production TTFT；Shared 在所有 SLO 都更好</td><td>KVS price sweep；换 tier seed；COMPUTE／MEMORY sizing；有限容量 eviction；M9 hardware calibration</td></tr></tbody></table>
+          <p class="fine">可复现证据：<code>results/m12-sizing-v1.2/cells.csv</code>、<code>threshold-frontier.csv</code>、<code>verdict.json</code>、<code>provenance.json</code>、<code>MANIFEST.json</code>。代码与 artifact 已备份到 GitHub main commit <code>16ffff9</code>。</p>
         </section>
 
         <template id="rollout-legacy-archive">
@@ -2370,8 +2376,8 @@ if move_score - keep_score &gt; safety_margin: abort_self
           </tbody></table>
           <div class="call bad"><div class="label">SUPERSEDED</div>历史 P−1 evidence 混入 routing confound，已撤回。当前证据只看 §5.4.2 和 <code>threshold-frontier.csv</code>。</div>
           <div class="call"><div class="label">对大规模 distributed PD 的可执行 insight</div><ul><li><strong>有 shared KVS：</strong>selector 的主目标应从“最大 cache hit”升级为“最小 required P”，同时把 queue、minimum-tier、fairness、KVS cost 当硬约束。</li><li><strong>没有 shared KVS：</strong>placement locality 仍然直接决定要补算多少 prefill，因此 stable ownership／session affinity 仍有价值。</li><li><strong>最值钱的点：</strong>不是把 57% hit 再抬一点，而是把复用能力兑换成可验证的 P resource saving。</li></ul></div>
-          <table><thead><tr><th>现在可以说</th><th>现在不能说</th><th>升级为生产结论还缺什么</th></tr></thead><tbody><tr><td>本 trace＋frozen normalized model 下，shared KVS 的 N* 为 2／4，local 为 3／7</td><td>不能说节省同等比例真实 GPU、提升同等比例 QPS／MFU</td><td>真实 prefill service time、KVT bandwidth／overlap、TTFT／TPOT、真实 tenant／tier、有限显存 eviction</td></tr></tbody></table>
-          <p class="fine">可复现证据：<code>src/prefill_cache_sim/m12_sizing.py</code>、<code>scripts/run_m12_sizing.py</code>、<code>results/m12-sizing/contract.json</code>、<code>cells.csv</code>、<code>verdict.json</code>、<code>provenance.json</code> 与 <code>MANIFEST.json</code>。provenance 指向 clean commit ca9affd。</p>
+          <table><thead><tr><th>现在可以说</th><th>现在不能说</th><th>升级为生产结论还缺什么</th></tr></thead><tbody><tr><td>历史结果已撤回；当前只引用正文 §5 的 v1.2 证据</td><td>不能说稳定节省真实 GPU、提升同等比例 QPS／MFU</td><td>真实 prefill service time、KVT bandwidth／overlap、TTFT／TPOT、真实 tenant／tier、有限显存 eviction</td></tr></tbody></table>
+          <p class="fine">历史 template 仅用于说明被撤回的结论；当前证据为 <code>results/m12-sizing-v1.2/</code>，GitHub commit <code>16ffff9</code>。</p>
           <h3>5.4 Kill／narrow criteria</h3>
           <ol>
             <li>
