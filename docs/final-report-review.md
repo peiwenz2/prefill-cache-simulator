@@ -63,7 +63,7 @@ request_slo_met = completed_full_output
 | 前 10 blocks remote fetch | `1,389×0.06＋5,120×0.01＝134.54` | 164.54 |
 | 完全 location miss，全部重算 | `6,509×0.06＝390.54` | 420.54 |
 
-结论不是“remote 永远最好”：local hit 最便宜。当前 frozen price 里，同一个 token 的 remote fetch 单价被定义为 `0.01 work`，recompute 单价被定义为 `0.06 work`，所以只对 fetched portion 而言便宜 6 倍。这个 6 倍是 scenario assumption，不是实验测出的收益；整条 request 还包含未命中的 1,389 tokens、queue 与 Decode，不能直接套 6 倍。
+结论不是“remote 永远最好”：local hit 最便宜。当前 frozen price 里，同一个 token 的 remote fetch 单价被定义为 `0.01 work`，recompute 单价被定义为 `0.06 work`，所以只对 fetched portion 而言便宜 6 倍。这个 6 倍是 scenario assumption，不是实验测出的收益；local hit＝0 也是 assumption，忽略 lookup／assembly，会高估 cache 收益。整条 request 还包含未命中的 1,389 tokens、queue 与 Decode，不能直接套 6 倍。
 
 ## 4. SLO 是什么
 
@@ -121,7 +121,7 @@ Gate：
 | Tier deadline | 5,000／20,000／100,000 work-time | 人为 synthetic completion SLO | 决定每条 request 是否按时 |
 | Minimum tier attainment | 80%；95% sensitivity | 三个 tier 分别算 `按时完成数÷offered 数` 后取最小值 | P≥2 后决定 N* |
 | Jain fairness | ≥0.90 | 人为 fairness floor | 只在 P=1 失败 |
-| P queue p95 | ≤20,000 work | 人为 operability guardrail | 只在 P=1 失败 |
+| P queue p95 | ≤20,000 work | 人为 backlog guardrail；不是 elapsed time 或 ms | 只在 P=1 失败 |
 | KVS bytes／work | ≤1,000,000 | 人为 transfer guardrail | 全 grid 最大为 ceiling 的 36.24% |
 
 为什么不能无限排队：P=1 的 completion=100%，说明所有 request 最终都跑完；但 minimum tier=0、Jain=0.7388、queue p95=3,201,033。排队不会丢 request，却会让 request 越过自己的 deadline，因此不能算 healthy capacity。
@@ -140,7 +140,7 @@ Gate：
 | 96% | 5 | 6 | 5 | priced Shared 反而多 1 P；禁止从局部门槛外推 |
 | 97% | P≤8 内不可行 | P≤8 内不可行 | P≤8 内不可行 | Grid exhausted，不能外推 |
 
-同 P 对比是在回答“remote reuse 的收益是否超过 transfer cost”，不是为了证明 Shared 一定赢。P=2 时，最差 tier 按时率从 77.43% 升到 80.88%（＋3.45pp），queue p95 从 12,615.42 降到 11,446.36 work-time（－9.27%），说明拥塞点有帮助。P=4 时，按时率只从 95.82% 升到 95.90%（＋0.08pp），queue p95 反而从 2,436.54 升到 2,445.12（＋0.35%），说明资源较充足时收益接近零。当前 tenant／tier 只使用一组 deterministic hash assignment，threshold frontier 尚未经过换 seed robustness 检查。
+同 P 对比是在回答“remote reuse 的收益是否超过 transfer cost”，不是为了证明 Shared 一定赢。24 个 cell 的最差档都是 STRICT（4,780 条）。P=2 时，Local 3,701 条按时，Shared 3,866 条按时，即多 165 条；queue backlog p95 从 12,615.42 降到 11,446.36 work（－9.27%），与拥塞点有帮助一致。P=3 时，Shared 4,485／4,780＝93.83% 反而低于 Local 4,504／4,780＝94.23%，直接造成 94% floor 下 Shared 多用 1 P；机制根因待验证。P=4 时，按时率只从 95.82% 升到 95.90%，queue backlog p95 反而从 2,436.54 升到 2,445.12 work（＋0.35%），收益接近零。当前 tenant／tier 只使用一组 deterministic hash assignment，threshold frontier 尚未经过换 seed robustness 检查。
 
 ## 7. 可以说／不能说
 
