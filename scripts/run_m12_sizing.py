@@ -320,6 +320,11 @@ def _topology_verdicts(
 def _record_row(
     record: SizingRunRecord, strict_cell: SizingCell
 ) -> dict[str, object]:
+    expected_tiers = {"STRICT", "STANDARD", "RELAXED"}
+    if set(record.per_tier_slo_attainment) != expected_tiers:
+        raise ValueError(
+            "sizing artifact requires exactly STRICT, STANDARD, and RELAXED tiers"
+        )
     observation = record.cell.observation
     return {
         "topology": record.cell.topology.value,

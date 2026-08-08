@@ -48,6 +48,40 @@ def record(
     )
 
 
+@pytest.mark.parametrize(
+    "tiers",
+    [
+        {"STRICT": 0.9, "STANDARD": 0.95},
+        {
+            "STRICT": 0.9,
+            "STANDARD": 0.95,
+            "RELAXED": 0.99,
+            "EXTRA": 1.0,
+        },
+    ],
+)
+def test_record_rejects_tier_maps_that_serializer_cannot_publish(
+    tiers: dict[str, float],
+) -> None:
+    observation = GateObservation(1.0, min(tiers.values()), 0.95, 10, 0.25)
+    invalid = SizingRunRecord(
+            SizingCell(1, SizingTopology.LOCAL_ONLY, observation, ()),
+            1.0,
+            0.1,
+            0.01,
+            0.5,
+            10,
+            5,
+            15,
+            0.7,
+            0.2,
+            tiers,
+            "f" * 64,
+        )
+    with pytest.raises(ValueError, match="requires exactly STRICT"):
+        build_artifacts((invalid,), {"trace_sha256": "a" * 64})
+
+
 def test_plan_is_complete_canonical_and_rejects_invalid_counts() -> None:
     plan = build_plan(
         (3, 1, 2),
