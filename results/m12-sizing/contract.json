@@ -10,7 +10,6 @@
   "claim_basis": "NORMALIZED_SIMULATION",
   "decode_node_count": 8,
   "gpu_capacity_claim": false,
-  "ideal_global_kvs_deployable": false,
   "observation_end_work": 6000000.0,
   "schema_version": "m12-sizing-v1",
   "service_regime": "MIXED",
@@ -28,5 +27,6 @@
   },
   "timestamp_mapping": "raw trace timestamp_ms, no replay slowdown",
   "trace_truth_basis": "SYNTHETIC_TENANT_TIER_ON_TRACE",
-  "wall_clock_claim": false
+  "wall_clock_claim": false,
+  "zero_transfer_price_control_deployable": false
 }

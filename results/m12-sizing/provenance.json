@@ -1,9 +1,10 @@
 {
   "git_dirty": false,
-  "git_sha": "ca9affd5522d053c4d95e8db6e2d808cc70e13f4",
+  "git_sha": "22e49bdfa0bcc23cb768efe526c7664b7a774cc1",
   "input_tokens": 202791701,
   "output_tokens": 4299817,
-  "record_count": 24,
+  "record_count": 23608,
+  "sizing_cell_count": 24,
   "tenant_counts": {
     "tenant-00": 1412,
     "tenant-01": 1454,

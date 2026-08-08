@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 
 import pytest
@@ -62,7 +64,7 @@ def test_plan_is_complete_canonical_and_rejects_invalid_counts() -> None:
         build_plan((True, 2))
 
 
-def test_artifacts_are_deterministic_manifested_and_exclude_ideal_winner(
+def test_artifacts_are_deterministic_and_exclude_zero_price_control_from_winner(
     tmp_path, monkeypatch
 ) -> None:
     records = (
@@ -123,8 +125,15 @@ def test_artifacts_are_deterministic_manifested_and_exclude_ideal_winner(
     provenance = json.loads(first["provenance.json"])
     assert provenance["record_count"] == 23_608
     assert provenance["sizing_cell_count"] == len(records)
-    frontier = first["threshold-frontier.csv"].decode()
-    assert "tier_slo_floor,topology,minimum_feasible_p" in frontier
+    frontier_text = first["threshold-frontier.csv"].decode()
+    frontier = list(csv.DictReader(io.StringIO(frontier_text)))
+    assert len(frontier) == 29 * 3
+    assert {float(row["tier_slo_floor"]) for row in frontier} == {
+        round(0.70 + 0.01 * index, 2) for index in range(29)
+    }
+    assert {row["topology"] for row in frontier} == {
+        topology.value for topology in SizingTopology
+    }
     output = tmp_path / "result"
     publish(output, first)
     assert (output / "MANIFEST.json").read_bytes() == first["MANIFEST.json"]

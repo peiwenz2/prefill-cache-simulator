@@ -43,10 +43,10 @@
           "topology": "SHARED_KVS"
         }
       ],
-      "selected_topology": "SHARED_KVS"
+      "selected_topology": "LOCAL_ONLY"
     },
-    "IDEAL_GLOBAL_KVS_CONTROL": {
-      "deployable": false,
+    "LOCAL_ONLY": {
+      "deployable": true,
       "grid_exhausted": false,
       "minimum_feasible_p": 2,
       "non_monotonic_p_counts": [],
@@ -65,25 +65,6 @@
         "required": {
           "FAIRNESS_FLOOR": 0.9,
           "P_QUEUE_P95_CEILING": 20000.0,
-          "TIER_SLO_FLOOR": 0.8
-        },
-        "topology": "IDEAL_GLOBAL_KVS_CONTROL"
-      }
-    },
-    "LOCAL_ONLY": {
-      "deployable": true,
-      "grid_exhausted": false,
-      "minimum_feasible_p": 3,
-      "non_monotonic_p_counts": [],
-      "predecessor_certificate": {
-        "failed_gates": [
-          "TIER_SLO_FLOOR"
-        ],
-        "observed": {
-          "TIER_SLO_FLOOR": 0.7596234309623431
-        },
-        "p_count": 2,
-        "required": {
           "TIER_SLO_FLOOR": 0.8
         },
         "topology": "LOCAL_ONLY"
@@ -113,6 +94,31 @@
         },
         "topology": "SHARED_KVS"
       }
+    },
+    "ZERO_TRANSFER_PRICE_CONTROL": {
+      "deployable": false,
+      "grid_exhausted": false,
+      "minimum_feasible_p": 2,
+      "non_monotonic_p_counts": [],
+      "predecessor_certificate": {
+        "failed_gates": [
+          "TIER_SLO_FLOOR",
+          "FAIRNESS_FLOOR",
+          "P_QUEUE_P95_CEILING"
+        ],
+        "observed": {
+          "FAIRNESS_FLOOR": 0.7387848923821669,
+          "P_QUEUE_P95_CEILING": 3201033.264799997,
+          "TIER_SLO_FLOOR": 0.0
+        },
+        "p_count": 1,
+        "required": {
+          "FAIRNESS_FLOOR": 0.9,
+          "P_QUEUE_P95_CEILING": 20000.0,
+          "TIER_SLO_FLOOR": 0.8
+        },
+        "topology": "ZERO_TRANSFER_PRICE_CONTROL"
+      }
     }
   },
   "interpretation": "minimum P under the frozen normalized model; not production GPU sizing",
@@ -126,7 +132,7 @@
             "TIER_SLO_FLOOR"
           ],
           "observed": {
-            "TIER_SLO_FLOOR": 0.8951882845188285
+            "TIER_SLO_FLOOR": 0.9435146443514645
           },
           "p_count": 3,
           "required": {
@@ -148,10 +154,10 @@
           "topology": "SHARED_KVS"
         }
       ],
-      "selected_topology": "SHARED_KVS"
+      "selected_topology": "LOCAL_ONLY"
     },
-    "IDEAL_GLOBAL_KVS_CONTROL": {
-      "deployable": false,
+    "LOCAL_ONLY": {
+      "deployable": true,
       "grid_exhausted": false,
       "minimum_feasible_p": 4,
       "non_monotonic_p_counts": [],
@@ -160,28 +166,9 @@
           "TIER_SLO_FLOOR"
         ],
         "observed": {
-          "TIER_SLO_FLOOR": 0.9451882845188284
+          "TIER_SLO_FLOOR": 0.9435146443514645
         },
         "p_count": 3,
-        "required": {
-          "TIER_SLO_FLOOR": 0.95
-        },
-        "topology": "IDEAL_GLOBAL_KVS_CONTROL"
-      }
-    },
-    "LOCAL_ONLY": {
-      "deployable": true,
-      "grid_exhausted": false,
-      "minimum_feasible_p": 7,
-      "non_monotonic_p_counts": [],
-      "predecessor_certificate": {
-        "failed_gates": [
-          "TIER_SLO_FLOOR"
-        ],
-        "observed": {
-          "TIER_SLO_FLOOR": 0.9430962343096234
-        },
-        "p_count": 6,
         "required": {
           "TIER_SLO_FLOOR": 0.95
         },
@@ -205,6 +192,25 @@
           "TIER_SLO_FLOOR": 0.95
         },
         "topology": "SHARED_KVS"
+      }
+    },
+    "ZERO_TRANSFER_PRICE_CONTROL": {
+      "deployable": false,
+      "grid_exhausted": false,
+      "minimum_feasible_p": 4,
+      "non_monotonic_p_counts": [],
+      "predecessor_certificate": {
+        "failed_gates": [
+          "TIER_SLO_FLOOR"
+        ],
+        "observed": {
+          "TIER_SLO_FLOOR": 0.9433054393305439
+        },
+        "p_count": 3,
+        "required": {
+          "TIER_SLO_FLOOR": 0.95
+        },
+        "topology": "ZERO_TRANSFER_PRICE_CONTROL"
       }
     }
   }

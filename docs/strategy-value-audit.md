@@ -1,7 +1,7 @@
 # Prefill Cache Simulator：策略价值与 benchmark 诚实性审计
 
 - 作者：张珮文
-- 数据与代码证据：`prefill-cache-sim@4a00f10`；报告修订：2026-08-08；M12 final grid 54／54 完成，0 failure；MANIFEST SHA-256 `89d4fb8d26a400d03a33538f2d889d2a3feb3bdf963ea219663d6e2004a69140`
+- 数据与代码证据：`prefill-cache-sim@22e49bd`；报告修订：2026-08-08；M12 final grid 54／54 完成；KVS sizing 已完成隔离变量重跑
 - 数据集：Mooncake `mooncake_trace.jsonl`，23,608 requests，512-token prefix blocks
 - 证据等级：论文原文＋本地 deterministic replay；真实 GPU／KVT／生产 shadow 仍未完成
 
@@ -468,74 +468,83 @@ S3 的 54.01% 距无限单池 token ceiling 57.07% 约 3.06 pp，但有限多节
 
 结论：**当前淘汰机制适合策略排序，不足以复现 Mooncake hardware benchmark。**最安全的说法是“trace-faithful prefix replay＋parameterized tier model”。
 
-## 5. Rollout／验收门
+## 5. 老板版验收：先把实验世界讲清楚
 
-这一轮只审方案，不展开下一阶段方案。要让现有结论升级，必须按下面的 falsification gate 验收。
+### 5.1 Trace 原生字段与人为实验参数
 
-| 优先级 | Gate | 状态 | 要证明什么 | 通过标准 |
-|---|---|---|---|---|
-| 1 | R1 shadow | collector 完成，未跑 3 天 | 生产 baseline 之上还有多少 locality／load-skew headroom | owner signoff＋privacy-safe real session key；3 天零 enforce；missing／divergence／fail-open 分账 |
-| 2，可与 R1 并行 | B0＋B0.5 | 未实现 | 复现论文 Table 1 趋势；TTL 表入仓可复现 | global pool 六档容量；LRU／LFU／LengthAware；TTL generator 一键出表 |
-| 3，立即排队 | M9-HW | harness 完成，evidence 未取得 | cost model 是否有物理单位 | 真实 engine provenance；prefill／decode／KVT／overlap residual gate |
-| 4 | M10-HW | harness 完成，evidence 未取得 | synthetic 排序是否跨硬件保留 | M9-HW 完成；frozen plan；真实压力 tau-b gate |
-| defer | B1 Tier fidelity | 仅保留最小模型 | 四层精细建模是否会改变决策 | M9-HW 前不增加“更精细的假参数”；只保留 conservation 与 B0 必需子集 |
-| freeze | D2 gate | upper-bound only | preemption 是否真的增加 completed goodput | Q5／Q6 与真实 resume 前不投入实现 |
-| 线 C 并行 | M12.0 reuse-time analyzer | `KILL_ROUTER_HOLD` | 3.05s bucket；5s 保守上界仅 0.1725%，低于 10% 约 58× | 停止 router hold；保留 placement locality／engine batching |
-| M12.1 | Metric contract v1.1 | ✅ 完成 | goodput／efficiency／KVS／fairness 不混口径 | frozen workload＋zero-attempt denominator＋work conservation |
-| M12.2–M12.5 | Goodput × Reuse | ✅ 54／54 完成 | Priced Spill、Decode Credits、cluster eviction 是否改善 strict goodput | G12-3 narrow；G12-4 kill／narrow；Pareto 与 attribution complete |
+| Quantity | Trace 原生？ | 来源／取值 | 怎么理解 |
+|---|---|---|---|
+| Arrival、input／output length、512-token chained hashes | 是 | 23,608 requests | 真实 workload shape；没有 token 内容 |
+| Tenant | 否 | request_id SHA-256 → 16 个 synthetic tenants | 只用于检查是否饿死某组流量 |
+| Service tier | 否 | STRICT 20%／STANDARD 60%／RELAXED 20% | 与真实客户等级无关 |
+| SLO budget | 否 | 5,000／20,000／100,000 normalized work | 不是 TTFT ms，也不是线上承诺 |
+| P／D／KVS cost | 否 | MIXED：0.0568／1.0／1.5e-7；64KiB／token | frozen model，尚未 hardware calibration |
 
-### 5.1 M12 final：高 hit 为什么仍然失败
+一条 request 的计算口径是：
 
-54 个 cell 不是 54 种可上线策略：45 个 primary＝3 个 cost regime（COMPUTE_BOUND／MEMORY_BOUND／MIXED）×5 个 offered-load scale（0.8×～2.0×）×3 个候选；9 个 sensitivity＝3 个 regime×No-Gate／Oracle／Noised-Oracle，固定在预注册的 1.5× 压力点。Oracle 会偷看未来，只是上界，不能部署。
+```text
+uncached = input − local_hit − remote_hit
+P_work   = uncached × 0.0568
+KVS_work = remote_hit × 65,536 × 1.5e−7
+D_work   = output × 1.0
+strict success = 完整输出且 finish_work − arrival_work ≤ tier_budget
+```
 
-MIXED 1.5× 是最关键反例：Decode Causal 的 token hit 从 Priced Spill 的 57.06% 提高到 76.11%，但 strict output goodput 相对同一修复代码重跑的 Decode No-Gate 从 0.14036 降到 0.12696，相对下降 9.55%。它把 queue p95 从 5360.22 降到 1503.10，却把 minimum tier attainment 从 0.9358 降到 0.7531，并产生 17,795 次 retry，其中 14,881 次被 gate。结论是：它能作为 overload pressure tool 继续验证，不能声称提高常态吞吐或公平性。
+Input length 不固定，直接使用 trace 中每条 request 的长度。等待时间计入 `finish−arrival`，所以“最终都跑完”不等于 SLO 通过。Fully-cold 时只有 28／4,780 条 STRICT request 自身 work 超过 budget；P=1 的 minimum-tier=0 主要来自 queue collapse，不是请求天然不可完成。
 
-PricedSpill 对 Baseline 只有＋0.266pp hit、＋0.0148% strict output、－0.107% queue p95。更重要的是全部 45 个 primary cells 都是 `capacity_binding=false`：实验没有制造出“缓存塞满后该扔谁”的条件，因此这是 null result，不是证明 PricedSpill 有效或无效。DecodeCausal 的 hit／queue／minimum-tier 变化以 PricedSpill 为对照；strict output 的－9.55% 以 Decode No-Gate 为对照，不能混成同一个 baseline。
+### 5.2 54 个 cell 是什么
 
-### 5.1.1 大规模 distributed PD 的当前选择
+一个 cell 是：固定 node、cost、arrival pressure 和 policy，从空 cache 开始完整重放全部 23,608 条 request。它不是一条 request，也不是一个 unit test。
 
-- 默认档：真实 session key 版 S4／stable prefix ownership＋bounded load gate。M4 100ms delayed-view 下，它相对 S3 少 0.67pp token 加权命中率，但 load skew 低 42.5%、queue p95 低 3.0%；8 nodes 下少 0.76pp，换来 skew 低 69.5%、queue p95 低 5.4%。
-- Fresh-view 档：只有 cache／queue census 足够新鲜时才考虑 S5／硬件标定后的 S6。0ms 下 S5 相对 S4 多 3.05pp hit、queue p95 低 26.8%，代价是 skew 高 26.3%。目前没有测出生产切换所需的 view-age 阈值。
-- KVS 档：PricedSpill 只进 shadow；现有 grid 没有 capacity binding。
-- Decode overload 档：DecodeCausal 只作 brake；queue p95 低 72%，但 strict output 低 9.55%、minimum tier 低 19.5%。
+- 45 primary＝3 个 synthetic cost regimes × 5 个 arrival scales × 3 个 candidate policies。
+- 9 sensitivity＝3 个 regimes × 固定 1.5× stress × No-Gate／Oracle／Noised-Oracle。
+- Arrival scale 只压缩请求间隔，不会把 input length 固定下来。
+- Oracle 会看未来，只能作为上界，不能部署。
 
-“S4 先缩域、S5／S6 再终选”是建议的组合架构，但还没有组合 experiment cell；真实 session key 也未验证。所有量化数字只在本 trace＋normalized simulator contract 内成立，不是 production TTFT／MFU 承诺。
+MIXED 1.5× Decode Causal 是专门构造的 overload stress cell，不代表平均情况：它把 decode credits 从 4,096 降到 128，并开启 abort／retry fence。Token hit 达到 76.11%，queue p95 下降 71.96%，但 strict output 对 No-Gate 下降 9.55%，minimum-tier 从 0.9358 降到 0.7531，并产生 17,795 retries。结论是只保留为 overload brake，不能宣称常态吞吐 winner。
 
-| Gate | Verdict | 结论 |
-|---|---|---|
-| G12-3 | `NARROW_OVERLOAD_ONLY` | accounting 与 offered load 守恒，但 throughput／fairness 不通过 |
-| G12-4 | `KILL_OR_NARROW` | 没有 capacity-binding cells；不能声称 eviction 有收益 |
-| Pareto／attribution | `COMPLETE` | 15 个 regime×scale group 完整；normalized 结果仍不能写成生产 MFU／毫秒 |
+Priced Spill 对 Baseline 只有＋0.266pp hit、＋0.0148% strict output、－0.107% queue p95；而 45 个 primary cells 全部 `capacity_binding=false`，所以当前没有真正测到“cache 塞满后扔谁”。这是 null result，不是 eviction 已被证明有效或无效。
 
-最终 artifact 包含 45 primary、9 sensitivity、0 failure、45 constraints、45 explanation 和 45 visibility rows；16 个 MANIFEST hash 全部匹配。修复前 base 有 53 个 cell；新代码重跑缺失的 Decode Causal 与 No-Gate 对照，最终保留 52 个旧代码 cell。4 个 retained samples 通过 row 与 decision fingerprint invariance；混合 provenance 与 recompute scope 均写入 evidence。`decision_points_moved=false` 是探针方法属性，表示不移动原定决策时点；`decision_sequence_unchanged=false` 是 cell 测量结果，表示延迟视图改变了实际选择，两者不矛盾。空的 `crossovers.csv` 表示没有 winner 切换，不是漏写。
+### 5.3 Resource sizing 是另一套 24-cell 实验
 
-### 5.2 Resource sizing insight：有 shared KVS 后，问题从 hit 变成最少需要几个 P
+Resource sizing 回答：在 completion、SLO、公平性和 queue 都过线时，最少需要几个 P。它是 3 种 topology × P=1～8＝24 次完整 replay，与 54-cell falsification grid 使用不同 arrival mapping、horizon 和 gate，数字不能混算。
 
-这一步回答原题可选扩展背后的系统问题：request timestamp 已经固定时，selector 不应只追求 cache hit，而应在 completion、SLO、公平性和 queue 都过线的前提下，寻找最小的 Prefill node 数量 `N*`。
+三组统一使用 HYBRID routing、threshold=2.0，并关闭 capacity eviction，只改变 remote cache 是否可见与 transfer price。旧版 local 使用 S4、shared 使用 HYBRID，混入 selector 差异，因此旧 `3→2`、`7→4` 资源节省 headline 已撤回。
 
-实验枚举 P=1～8，不做二分搜索；每个 P 都重放 23,608 个原始 timestamp 请求。D 固定为 8 个 node，单 P 服务能力固定；cache 容量设为可容纳 trace 全部 unique block，用于隔离“资源数量／KVS topology”的影响，因此这不是 eviction benchmark。三种 topology 分别为：`LOCAL_ONLY`、付出 transfer cost 的 `SHARED_KVS`，以及 transfer cost=0 的不可部署 `IDEAL_GLOBAL_KVS_CONTROL`。最后一个只用于标理论下界。
+| Gate | Threshold | 白话含义 | 本次哪里 binding |
+|---|---:|---|---|
+| Completion | 100% | Horizon 内全部 request 完成 | 24 cells 全通过 |
+| Minimum-tier SLO attainment | 80%；95% sensitivity | 三档里最差一档的按时完成比例 | P≥2 后唯一决定 N* |
+| Jain fairness | ≥0.90 | 16 个 synthetic tenants 的 token service ratio 是否接近 | 只在 P=1 失败 |
+| P queue p95 | ≤20,000 work | 95% 决策点看到的 P backlog；不是 ms | 只在 P=1 失败 |
+| KVS bytes／work | ≤1,000,000 | Remote transfer guardrail；不是真实 GB／s | 从未接近上限 |
 
-| Gate | 普通门槛 | 严格 sensitivity | 白话含义 |
-|---|---:|---:|---|
-| Completion | 100% | 100% | 所有 request 最终完成 |
-| Minimum tier SLO attainment | ≥0.80 | ≥0.95 | 最差服务等级也必须过线 |
-| Jain fairness | ≥0.90 | ≥0.90 | 不能只让一部分 tenant 快 |
-| P queue p95 | ≤20,000 normalized work | 同左 | 队列不能无限堆积；不是毫秒 |
-| KVS bytes／work | ≤1,000,000 | 同左 | shared KVS 搬运量不能越界 |
+P=1 虽然 completion=100%，但 minimum-tier=0、Jain=0.7388、queue p95=3,201,033，因此“让请求无限排队，最后跑完”仍不及格。
 
-| Topology | 普通门槛 `N*` | 严格门槛 `N*` | 相对 local 的资源变化 |
-|---|---:|---:|---:|
-| Ideal global KVS control | 2 | 4 | 不可部署的零成本下界 |
-| Local-only cache | 3 | 7 | baseline |
-| Shared KVS，计入 transfer cost | **2** | **4** | 少 1／3 个 P，即 **33.3%／42.9%** |
+| Minimum-tier floor | Local-only N* | Shared KVS N* | Zero-price N* | 怎么读 |
+|---:|---:|---:|---:|---|
+| 75% | 2 | 2 | 2 | 无差异 |
+| 80% | 2 | 2 | 2 | 旧 3→2 撤回 |
+| 83%／85% | 3 | **2** | 2 | Shared 少 1 P |
+| 86%／90% | 3 | 3 | 3 | 差异消失 |
+| 95% | 4 | 4 | 4 | 旧 7→4 撤回 |
+| 96% | 5 | **4** | 5 | Shared 少 1 P |
+| 97% | ＞8 | ＞8 | ＞8 | Grid exhausted；禁止外推 |
 
-普通门槛下，local P=2 只因 minimum-tier=0.7596＜0.80 失败；shared P=2 达到 0.8508。严格门槛下，local P=6 为 0.9431＜0.95，shared P=4 为 0.9611。两档真正 binding 的都是最差 tier SLO，不是平均 utilization，也不是 KVS bandwidth。每个最小值都带 P−1 failure certificate；“winner”只在这套 normalized contract 内成立，不等于真实 GPU 数量或 production QPS。
+同 P=2 时，Shared 把 minimum-tier 从 0.8197 提到 0.8508（＋3.12pp），queue p95 从 9,950.74 降到 9,032.79（－9.22%），token hit 增加 2.22pp。同 P=4 时，minimum-tier ＋0.33pp，queue p95 －0.58%。稳定结论是 Shared KVS 改善同 P 的 tail service quality；能否少一台 P 取决于业务选择的 SLO floor，不能再包装成固定 33.3%／42.9% 节省。
 
-工程 insight 是：有 shared KVS 时，cache locality 不再是唯一目标；selector 应最小化 `required P`，同时约束 queue、最差 tier、fairness 和 KVS cost。当前结果支持继续做 hardware calibration，但不能直接做采购或容量承诺，因为服务时间、KVT bandwidth、TTFT／TPOT 仍是 normalized model，tenant／tier 也是 deterministic synthetic overlay。
+代码与证据：`src/prefill_cache_sim/m12_sizing.py`、`scripts/run_m12_sizing.py`、`results/m12-sizing/{contract,cells,threshold-frontier,verdict,provenance,MANIFEST}`。
 
-代码与证据：`src/prefill_cache_sim/m12_sizing.py`、`scripts/run_m12_sizing.py`、`results/m12-sizing/{contract,cells,verdict,provenance,MANIFEST}`。
+### 5.4 大规模 distributed PD 的当前选择
 
-### 5.3 Kill／narrow criteria
+- 默认档：真实 session key 版 S4／stable prefix ownership＋bounded load gate。M4 100ms delayed-view 下，它相对 S3 少 0.67pp token hit，但 load skew 低 42.5%、queue p95 低 3.0%。
+- Fresh-view 档：只有 cache／queue census 足够新鲜时才考虑中心化 master。0ms 下它相对 S4 多 3.05pp hit、queue p95 低 26.8%，但 stale view 会引发 herding；尚未找到 production 的安全 view-age 阈值。
+- Shared KVS 档：优先看 `N*(SLO floor)` staircase 与同 P 的 tail improvement，不再单看 hit。
+- Decode overload 档：Decode Causal 只作 brake；不能作为常态 throughput policy。
+
+所有数字只在本 trace＋normalized simulator contract 内成立，不是 production TTFT／MFU／GPU 数承诺。
+
+### 5.5 Kill／narrow criteria
 
 1. **WHERE line kill**：R1 若显示 production baseline 距可用 locality ceiling 小于 2 pp，且 load skew 没有可改善空间，关闭 selector enforcement 线；保留 lifecycle RFC。
 2. **S4 kill**：拿不到 privacy-safe real session key，S4 降为 research result；不把 prefix-family proxy 上线。

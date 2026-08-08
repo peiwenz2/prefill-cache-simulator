@@ -1,9 +1,10 @@
 {
   "files": {
-    "cells.csv": "7502ce61659bf471ef28c05c51d79e58cbf0ce1185d466f0403011d1365157d3",
-    "contract.json": "519c48110e61c08f3f10114585a3af0a85de6f52d7f771e264a8c36c14e75a41",
-    "provenance.json": "17bdc02f676b21b97fee5c5b9a17bade61614d5f1f5121f3d8e1f4571470e74e",
-    "verdict.json": "76b25fd1c339c0da866e8b1f64126143efe62defa5ac745ff572233213d39f54"
+    "cells.csv": "0b8759221fb91958e5b566089c2489211f423974e4c74c1386665b21e60a954f",
+    "contract.json": "5128a31f630543868fd9dcdc4b0a7ef90aa1e23ba9faf0cef7bf606f79fde073",
+    "provenance.json": "104419a0b01c870376bec24415bcf93d1dec61e5c00ed023e77bd88ed88dcf31",
+    "threshold-frontier.csv": "d7dc0884c896f3f2c54facb436e0363eb12e9187e2ec156310a394797096b977",
+    "verdict.json": "9c73bd6d407f6caa96537611d4241f83499d0806cfec4c92f187b395f12ec796"
   },
   "schema_version": "m12-sizing-manifest-v1"
 }

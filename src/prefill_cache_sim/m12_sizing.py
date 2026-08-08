@@ -426,7 +426,7 @@ def _sizing_policy(
         PlacementMode.HYBRID,
         cost,
         kvs_enabled=True,
-        # The ideal control changes only transfer price.  Keeping the same
+        # The zero-transfer-price control changes only transfer price. Keeping the same
         # routing threshold as SHARED_KVS makes it a price-only control.
         mooncake_balancing_threshold=2.0,
         request_truth=workload.request_truth,
