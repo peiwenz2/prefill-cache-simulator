@@ -25,6 +25,7 @@ from prefill_cache_sim.config import git_provenance  # noqa: E402
 from prefill_cache_sim.m12_metrics import SERVICE_REGIMES  # noqa: E402
 from prefill_cache_sim.m12_placement import PlacementWorkload  # noqa: E402
 from prefill_cache_sim.m12_sizing import (  # noqa: E402
+    GateObservation,
     SizingCell,
     SizingGates,
     SizingRunRecord,
@@ -134,10 +135,12 @@ def run_grid(
         with ProcessPoolExecutor(
             max_workers=min(jobs, len(args)), mp_context=get_context("fork")
         ) as executor:
-            pending = {executor.submit(_run_grid_cell, value): value for value in args}
+            pending = {
+                executor.submit(_run_grid_cell_wire, value): value for value in args
+            }
             for index, future in enumerate(as_completed(pending), 1):
                 value = pending[future]
-                records.append(future.result())
+                records.append(_record_from_wire(future.result()))
                 print(
                     f"[{index}/{len(plan)}] done {value[0].value} P={value[1]}",
                     flush=True,
@@ -163,6 +166,64 @@ def _run_grid_cell(
         tier_slo_work=TIER_SLO_WORK,
         cache_capacity_entries_per_p=capacity,
         decode_node_count=8,
+    )
+
+
+def _run_grid_cell_wire(value: tuple[SizingTopology, int, int]) -> dict[str, object]:
+    record = _run_grid_cell(value)
+    observation = record.cell.observation
+    return {
+        "topology": record.cell.topology.value,
+        "p_count": record.cell.p_count,
+        "observation": (
+            observation.completion_ratio,
+            observation.minimum_tier_slo_attainment,
+            observation.jain_fairness,
+            observation.p_queue_p95_work,
+            observation.kvs_bytes_per_work,
+        ),
+        "failed_gates": record.cell.failed_gates,
+        "scalars": (
+            record.strict_useful_token_goodput,
+            record.strict_useful_output_token_goodput,
+            record.request_goodput,
+            record.token_hit_rate,
+            record.local_hit_tokens,
+            record.remote_hit_tokens,
+            record.recompute_tokens,
+            record.p_normalized_utilization,
+            record.d_normalized_utilization,
+            record.p_queue_wait_p50_work,
+            record.p_queue_wait_p95_work,
+            record.p_queue_wait_p99_work,
+            record.final_alive_blocks_mean_per_p,
+            record.final_alive_blocks_min_per_p,
+            record.final_alive_blocks_max_per_p,
+            record.normalized_kvs_work,
+        ),
+        "per_tier_slo_attainment": dict(record.per_tier_slo_attainment),
+        "per_tier_completion_elapsed_work": {
+            tier: tuple(values)
+            for tier, values in record.per_tier_completion_elapsed_work.items()
+        },
+        "decision_fingerprint": record.decision_fingerprint,
+    }
+
+
+def _record_from_wire(value: Mapping[str, object]) -> SizingRunRecord:
+    observation = GateObservation(*value["observation"])
+    cell = SizingCell(
+        int(value["p_count"]),
+        SizingTopology(str(value["topology"])),
+        observation,
+        tuple(value["failed_gates"]),
+    )
+    return SizingRunRecord(
+        cell,
+        *value["scalars"],
+        value["per_tier_slo_attainment"],
+        value["per_tier_completion_elapsed_work"],
+        str(value["decision_fingerprint"]),
     )
 
 
