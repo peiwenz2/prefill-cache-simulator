@@ -1,0 +1,10 @@
+{
+  "files": {
+    "cells.csv": "a2c9484b181f803893e8937e5cb758bb2a7c11a0f2ad9abc9823ed060c8398a7",
+    "contract.json": "b777d4586b8375b4f7a894b32588bd48f513f67f2602655132096739665f7f86",
+    "provenance.json": "8a8c460e39ebeab713004dab09631f4c0f744b75c5f46227b1d38fd40f68c85b",
+    "threshold-frontier.csv": "75768e5420b1e39befbd60d526df6876b89682174719a7c4e83e59f2972c1a9d",
+    "verdict.json": "327154b0c2344b3a8c9e065233c6d13ce66fced0a4b38118e3e5365f4443526c"
+  },
+  "schema_version": "m12-sizing-manifest-v1"
+}

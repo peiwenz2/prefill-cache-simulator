@@ -1,0 +1,43 @@
+{
+  "baseline_gates": {
+    "maximum_kvs_bytes_per_work": 1000000.0,
+    "maximum_p_queue_p95_work": 20000.0,
+    "minimum_completion_ratio": 1.0,
+    "minimum_jain_fairness": 0.9,
+    "minimum_tier_slo_attainment": 0.8
+  },
+  "cache_capacity_mode": "NO_EVICTION_CAPACITY_CONTROL_PER_P_NODE",
+  "claim_basis": "NORMALIZED_SIMULATION",
+  "decode_node_count": 8,
+  "gpu_capacity_claim": false,
+  "observation_end_work": 6000000.0,
+  "schema_version": "m12-sizing-v2",
+  "service_costs": {
+    "decode_batch_max_saving": 0.25,
+    "decode_batch_saturation_sequences": 48,
+    "decode_token_work": 1.0,
+    "kvs_bytes_per_token": 65536,
+    "kvs_token_work": 0.01,
+    "prefill_batch_max_saving": 0.3,
+    "prefill_batch_saturation_tokens": 49152,
+    "prefill_token_work": 0.06,
+    "regime_id": "MIXED"
+  },
+  "service_regime": "MIXED",
+  "strict_95_gates": {
+    "maximum_kvs_bytes_per_work": 1000000.0,
+    "maximum_p_queue_p95_work": 20000.0,
+    "minimum_completion_ratio": 1.0,
+    "minimum_jain_fairness": 0.9,
+    "minimum_tier_slo_attainment": 0.95
+  },
+  "tier_slo_work": {
+    "RELAXED": 100000.0,
+    "STANDARD": 20000.0,
+    "STRICT": 5000.0
+  },
+  "timestamp_mapping": "raw trace timestamp_ms, no replay slowdown",
+  "trace_truth_basis": "SYNTHETIC_TENANT_TIER_ON_TRACE",
+  "wall_clock_claim": false,
+  "zero_transfer_price_control_deployable": false
+}
