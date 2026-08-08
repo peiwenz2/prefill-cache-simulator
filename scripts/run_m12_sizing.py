@@ -43,6 +43,7 @@ DEFAULT_P_COUNTS = tuple(range(1, 9))
 DEFAULT_TOPOLOGIES = tuple(SizingTopology)
 BASELINE_GATES = SizingGates(1.0, 0.80, 0.90, 20_000.0, 1_000_000.0)
 STRICT_95_GATES = SizingGates(1.0, 0.95, 0.90, 20_000.0, 1_000_000.0)
+TIER_FLOOR_SENSITIVITY = tuple(value / 100 for value in range(70, 99))
 SIZING_OBSERVATION_END_WORK = OBSERVATION_END_WORK / ARRIVAL_SCALE
 RESULT_FIELDS = (
     "topology",
@@ -175,16 +176,49 @@ def build_artifacts(
         **trace_metadata,
         "git_sha": provenance.sha,
         "git_dirty": provenance.dirty,
-        "record_count": len(records),
+        "sizing_cell_count": len(records),
     }
     artifacts = {
         "contract.json": _json_bytes(contract),
         "cells.csv": _csv_bytes(rows),
+        "threshold-frontier.csv": _csv_bytes(
+            _threshold_frontier_rows(baseline_cells),
+            ("tier_slo_floor", "topology", "minimum_feasible_p"),
+        ),
         "verdict.json": _json_bytes(summary),
         "provenance.json": _json_bytes(provenance_payload),
     }
     artifacts["MANIFEST.json"] = _manifest_bytes(artifacts)
     return artifacts
+
+
+def _threshold_frontier_rows(
+    cells: Sequence[SizingCell],
+) -> list[dict[str, object]]:
+    """Post-hoc tier-floor sensitivity; all other gates remain frozen."""
+    rows: list[dict[str, object]] = []
+    for floor in TIER_FLOOR_SENSITIVITY:
+        gates = replace(BASELINE_GATES, minimum_tier_slo_attainment=floor)
+        reevaluated = tuple(_reevaluate(cell, gates) for cell in cells)
+        for topology in sorted(SizingTopology, key=lambda value: value.value):
+            verdict = select_minimum(
+                reevaluated,
+                gates,
+                include_control=not topology.deployable,
+                required_topologies=(topology,),
+            )
+            rows.append(
+                {
+                    "tier_slo_floor": floor,
+                    "topology": topology.value,
+                    "minimum_feasible_p": (
+                        verdict.minimum_feasible_p
+                        if verdict.minimum_feasible_p is not None
+                        else "GRID_EXHAUSTED"
+                    ),
+                }
+            )
+    return rows
 
 
 def publish(output_dir: Path, artifacts: Mapping[str, bytes]) -> None:
@@ -324,9 +358,12 @@ def _json_bytes(value: object) -> bytes:
     ).encode()
 
 
-def _csv_bytes(rows: Sequence[Mapping[str, object]]) -> bytes:
+def _csv_bytes(
+    rows: Sequence[Mapping[str, object]],
+    fieldnames: Sequence[str] = RESULT_FIELDS,
+) -> bytes:
     output = io.StringIO(newline="")
-    writer = csv.DictWriter(output, fieldnames=RESULT_FIELDS, lineterminator="\n")
+    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
     writer.writerows(rows)
     return output.getvalue().encode()

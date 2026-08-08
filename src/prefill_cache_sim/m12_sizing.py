@@ -420,12 +420,13 @@ def _sizing_policy(
             kvs_enabled=False,
             request_truth=workload.request_truth,
         )
-    threshold = 1.0 if topology is SizingTopology.IDEAL_GLOBAL_KVS else 2.0
     return M12PlacementPolicy(
         PlacementMode.HYBRID,
         cost,
         kvs_enabled=True,
-        mooncake_balancing_threshold=threshold,
+        # The ideal control changes only transfer price.  Keeping the same
+        # routing threshold as SHARED_KVS makes it a price-only control.
+        mooncake_balancing_threshold=2.0,
         request_truth=workload.request_truth,
     )
 

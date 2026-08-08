@@ -76,11 +76,11 @@ def test_artifacts_are_deterministic_manifested_and_exclude_ideal_winner(
     monkeypatch.setattr(sizing_runner, "git_provenance", lambda _root: clean)
     first = build_artifacts(
         records,
-        {"trace_sha256": "a" * 64},
+        {"trace_sha256": "a" * 64, "record_count": 23_608},
     )
     second = build_artifacts(
         tuple(reversed(records)),
-        {"trace_sha256": "a" * 64},
+        {"trace_sha256": "a" * 64, "record_count": 23_608},
     )
     assert first == second
     manifest = json.loads(first["MANIFEST.json"])
@@ -118,6 +118,11 @@ def test_artifacts_are_deterministic_manifested_and_exclude_ideal_winner(
         ]
         == 1
     )
+    provenance = json.loads(first["provenance.json"])
+    assert provenance["record_count"] == 23_608
+    assert provenance["sizing_cell_count"] == len(records)
+    frontier = first["threshold-frontier.csv"].decode()
+    assert "tier_slo_floor,topology,minimum_feasible_p" in frontier
     output = tmp_path / "result"
     publish(output, first)
     assert (output / "MANIFEST.json").read_bytes() == first["MANIFEST.json"]

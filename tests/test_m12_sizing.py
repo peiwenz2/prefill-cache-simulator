@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import pytest
 
+import prefill_cache_sim.m12_sizing as sizing
 from prefill_cache_sim.m12_metrics import SERVICE_REGIMES
 from prefill_cache_sim.m12_placement import TraceRequestInput, build_kernel_requests
 from prefill_cache_sim.m12_sizing import (
@@ -250,6 +251,18 @@ def test_ideal_global_kvs_allows_remote_hit_without_transfer_work() -> None:
     assert ideal.remote_hit_tokens > 0
     assert ideal.normalized_kvs_work == 0
     assert local.remote_hit_tokens == 0
+
+
+def test_ideal_control_changes_only_transfer_price_not_routing_threshold() -> None:
+    workload = build_kernel_requests([_trace_row("one", 0, ("A",), (10,))])
+    cost = sizing._sizing_cost(
+        SERVICE_REGIMES[2], SizingTopology.IDEAL_GLOBAL_KVS, 1.0, 16
+    )
+    policy = sizing._sizing_policy(
+        SizingTopology.IDEAL_GLOBAL_KVS, cost, workload
+    )
+    assert cost.kvs_work_per_token == 0
+    assert policy.mooncake_balancing_threshold == 2.0
 
 
 def test_sizing_cell_resizes_cohort_eligibility_to_requested_p_count() -> None:
