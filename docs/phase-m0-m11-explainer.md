@@ -197,7 +197,7 @@ M12 新增第三条研究线：它不等待生产 owner 签字，可以先在 CP
 
 | 门 | 内容 | 关键条件 |
 |---|---|---|
-| G0 | owner sign-off | Centralized Master（push 版图）与 Turbo（pull 版图）owner 对 RFC §2 attach 方式签字；Turbo pull-shadow 语义需 owner 确认 |
+| G0 | owner sign-off | 中心化 master（push 版图）与 Turbo（pull 版图）owner 对 RFC §2 attach 方式签字；Turbo pull-shadow 语义需 owner 确认 |
 | G1' R0 | enforcement=off，只建指标管线 | RFC §8 观测指标落地 |
 | R1 | shadow 3 天 | 影子决策与线上决策 diff 报告，零 enforce |
 | G4 R2 | 单 deployment canary enforce | R1 通过后 |
@@ -206,7 +206,7 @@ M12 新增第三条研究线：它不等待生产 owner 签字，可以先在 CP
 
 ### 6.3 M11 RFC 已定的关键决策（`docs/m11-production-rfc.md`）
 
-- attach 点：把**带版本的打分函数**交付给现有版图 owner（centralized master 是 push 型，Turbo CacheAwareScheduler 是 pull 型），**不建第三张全局图**。
+- attach 点：把**带版本的打分函数**交付给现有版图 owner（中心化 master 是 push 型，Turbo CacheAwareScheduler 是 pull 型），**不建第三张全局图**。
 - WHERE 与生命周期分离：selector 只回答 WHERE（`LegRoute { prefer_host, exclude_hosts, hint_input_tokens }`）；LLMClientV1 保有 logical_request_id、attempt 身份、重试预算、续段、OutputAuthority（epoch + output_seq 围栏）、durable output-ack ledger。
 - 四档 enforcement：off｜shadow｜enforce｜required；fail-open 五种原因计数（timeout／error／stale view／capability mismatch／planner unavailable）。
 - 能力握手：PREFIX_CACHE_QUERY、DECODE_LEASE_V1、R2_CHECKPOINT_STORE、COOPERATIVE_PREEMPT；**未握手实例按零能力对待**。

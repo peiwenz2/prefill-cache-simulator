@@ -96,7 +96,7 @@ reader determine whether the code in front of them is the code that ran.
 | --- | --- | --- |
 | `S0_RANDOM` | `BASELINE` | Comparison baseline |
 | `S3_GB_PREFIX_BUCKET` | `CANDIDATE` | Prefix-bucket candidate |
-| `S5_FLEXLB_TTFT` | `STOP_GATED` | Carries the M6-M8 stop gate; replayed, never promoted |
+| `S5_CENTRALIZED_MASTER_TTFT` | `STOP_GATED` | Carries the M6-M8 stop gate; replayed, never promoted |
 | `S4_SESSION_AFFINITY` | `M4_WINNER` | The arm M4 selected |
 
 ## Three-source reconciliation
@@ -171,7 +171,7 @@ before reading anything into that.**
 `ShadowEnforcementError`. Nothing in M10 gates, promotes, or demotes an arm.
 
 Recorded outcomes (identical across all four metrics): `S3_GB_PREFIX_BUCKET` and
-`S4_SESSION_AFFINITY` are `SHADOW_RECOMMENDED`; `S5_FLEXLB_TTFT` is
+`S4_SESSION_AFFINITY` are `SHADOW_RECOMMENDED`; `S5_CENTRALIZED_MASTER_TTFT` is
 `SHADOW_WITHHELD` with reason `CANDIDATE_DOES_NOT_BEAT_BASELINE`. That S5 lands
 withheld is consistent with its M6-M8 stop gate but is **not** an independent
 confirmation of it — same simulator, same trace.

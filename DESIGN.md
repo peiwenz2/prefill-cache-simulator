@@ -45,9 +45,9 @@ dashscope-turbo 把关注点拆成互斥的策略类：`CacheAwareScheduler`、`
 内部中心化 master 的 `ShortestTTFTStrategy` 是本地代码里最接近答案的实现（具体路径脱敏）：
 
 ```java
-// centralized master .. TaskInfo.estimatePrefillTimeMs
+// 中心化 master .. TaskInfo.estimatePrefillTimeMs
 prefillTime = tokens * 1.0 - hitCacheTokens * 0.7      // 命中 token 打 3 折
-// centralized master .. ShortestTTFTStrategy.scoreWorkers
+// 中心化 master .. ShortestTTFTStrategy.scoreWorkers
 TTFT(worker) = prefillTime + worker.runningQueueTime    // ← 相对 TTFT
 // selectBestWorker: TTFT 升序 → top 30% 候选 → max(0.1·minTTFT, 0.5·stddev) 相似带
 //                → lastSelectedTime 公平性 CAS

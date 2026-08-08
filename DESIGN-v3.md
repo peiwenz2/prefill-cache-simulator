@@ -97,7 +97,7 @@ lenient_completed_goodput
 | Turbo `CacheAwareScheduler` | pull-based queue；实例按 cache bucket range 拉请求；同时受 batch、running token、prefill concurrency、prefill token 四道容量限制 | 模拟 `GBPrefixBucketSelector`＋`AdmissionView` |
 | Turbo `StickySessionScheduler` | bucket primary／alternative range；找不到匹配 engine 时不硬 fallback；同样带 batch／token／prefill capacity gate | 模拟 `StickySessionSelector`＋bounded fallback |
 | Turbo `PdPrefillScheduler` | request／token capacity、length capacity、engine 上报的 cached token queue snapshot | 定义 selector 可见的 `NodeSnapshot` |
-| Centralized Master `ShortestTTFTStrategy` | `TTFT = queueTime + tokens - 0.7×hitCacheTokens`；top 30%＋similar band＋last-selected CAS fairness | 模拟 `CentralizedMasterTtftSelector`，保持公式版本可替换 |
+| 中心化 master `ShortestTTFTStrategy` | `TTFT = queueTime + tokens - 0.7×hitCacheTokens`；top 30%＋similar band＋last-selected CAS fairness | 模拟 `CentralizedMasterTtftSelector`，保持公式版本可替换 |
 | Session affinity shadow 实践 | synchronous、bounded、fail-open；mock 不能冒充 production semantics | `AffinityKeyProvider` 独立，trace 无 session ID 时明确叫 proxy |
 | KV-Ledger／S6 | logical request 首次 P 命中口径与后续 retry／resched 的 engine work 口径分开 | 指标分 user view 与 engine view |
 | V6dCacheQueryUtil | prefill 前可用 token IDs 查询 KVS 命中，失败可降级 unknown | `KvsLookup` 可插拔，先 simulation、后 shadow query |
@@ -109,7 +109,7 @@ lenient_completed_goodput
 代码证据版本：
 
 - dashscope-platform：本地缓存的 `origin/main@afb893c7e826`。本轮 fetch 因内网凭证失败；相关 selector 文件与当前 working commit 内容一致，但开工前仍必须重新 fetch。
-- RTP-LLM：`origin/main@cd77137bf307`；working tree 比它少 18 commit，但本轮引用的两个 Centralized Master 文件在两者之间无 diff。
+- RTP-LLM：`origin/main@cd77137bf307`；working tree 比它少 18 commit，但本轮引用的两个 中心化 master 文件在两者之间无 diff。
 - dashserving：已 fetch `aone/main@fe13ca3f1c3b`；当前 checkout 有用户改动，不读取 checkout 作为 main 真值。
 - dashllm：Aone fetch 成功；实现阶段重新钉目标 branch／commit。
 
@@ -244,7 +244,7 @@ class NodeSnapshot:
 View modes：
 
 - `ORACLE`：当前 simulator 真值。
-- `DELAYED(delta_ms)`：周期上报，模拟 Turbo／Centralized Master state staleness。
+- `DELAYED(delta_ms)`：周期上报，模拟 Turbo／中心化 master state staleness。
 - `LOSSY(p)`：部分 node 缺 cache stats，验证 fail-open。
 
 ### 2.3 五个基础接口
@@ -320,8 +320,8 @@ inflight block 在完成前始终 pinned，不参与 eviction；producer 失败�
 | S2 | `LeastWorkSelector` | Global Batching capacity view | 最小 `queued_uncached_tokens + running_prefill_tokens` | 只看负载的收益 |
 | S3 | `GBPrefixBucketSelector` | CacheAware／Sticky bucket ownership | `AffinityKeyProxy → bucket → primary node`；soft overload 时 bounded secondary／LeastWork | 静态亲和的 hit／skew tradeoff |
 | S4 | `SessionAffinitySelector` | StickySession | 已见 affinity key 优先 last node；超过 overload threshold 后 fail-open LeastWork | session continuity 是否比 prefix bucket 更稳 |
-| S5 | `CentralizedMasterTtftSelector` | Centralized Master | `queue_ms + input_tokens - 0.7×hit_tokens`；top 30% similar band 内 LRU node | cache＋load 统一是否优于硬 sticky |
-| S6 | `CalibratedTtftSelector` | 本设计 basic+ | `queue_ms + prefill_ms(uncached_tokens, state)` | 替掉 Centralized Master 拍脑袋 0.7 |
+| S5 | `CentralizedMasterTtftSelector` | 中心化 master | `queue_ms + input_tokens - 0.7×hit_tokens`；top 30% similar band 内 LRU node | cache＋load 统一是否优于硬 sticky |
+| S6 | `CalibratedTtftSelector` | 本设计 basic+ | `queue_ms + prefill_ms(uncached_tokens, state)` | 替掉 中心化 master 拍脑袋 0.7 |
 | S7 | `CacheSloSelector` | 本设计 advanced | 在 S6 上按 normalized slack／risk 选，cache warmth 只在相似 risk band 内 tie-break | SLO 是否自然化解 affinity／balance 冲突 |
 
 `GBPrefixBucketSelector` 不是逐行复制 Turbo。Turbo 是 engine pull queue，本 simulator 是 request push API；二者通过相同 bucket ownership／primary-secondary range／capacity gate 做语义等价。
@@ -396,7 +396,7 @@ Selector sweep 后固定 Top-2 selector，再换 eviction：
 
 1. Random 把相同 prefix 打散，8 nodes／50k 总容量损失约 17pp。
 2. PrefixAnchor(2) 几乎恢复 token-weighted infinite ceiling `57.070%`，但负载很歪：8 nodes request max／mean=`3.55×`，input token max／mean=`2.98×`。
-3. 这正是 Centralized Master／S6 要回答的 tradeoff：不要只看 hit，也不要只看 balance。
+3. 这正是 中心化 master／S6 要回答的 tradeoff：不要只看 hit，也不要只看 balance。
 4. `PrefixAnchor(1)` 受超热共同首块影响，8 nodes／50k 只有 43.73%；anchor choice 不能写死。
 
 最终实现必须用 versioned config 重跑，同时输出 block-ref 与 token-weighted 两张表；以上数字不作为正式结论。
@@ -624,7 +624,7 @@ LLMClientV1 同时拥有：
 - P probe、D probe、KVS estimate；
 - next attempt 的路由入口。
 
-Engine 适合做 token scheduling 和 local preemption；Turbo／Centralized Master 适合选 instance；只有 client 能把“当前 D 不值得继续”转换成“带 checkpoint 的另一次 D attempt”，并保证用户 output 不重复。
+Engine 适合做 token scheduling 和 local preemption；Turbo／中心化 master 适合选 instance；只有 client 能把“当前 D 不值得继续”转换成“带 checkpoint 的另一次 D attempt”，并保证用户 output 不重复。
 
 ### 7.2 不做“谁低优就杀谁”
 
@@ -756,7 +756,7 @@ Baseline 与 candidate 共用相同 seeds 713～720。
 |---|---|---|---|
 | B0 | Random | PD | no lease |
 | B1 | GBPrefixBucket | PD | no lease |
-| B2 | Centralized Master | PD | no lease |
+| B2 | 中心化 master | PD | no lease |
 | B3 | CalibratedTTFT | gated-PD | no lease |
 | B4 | CacheSLO | gated-PD | fixed lease D1 |
 | B5 | CacheSLO | gated-PD | adaptive lease D1.5 |
@@ -785,7 +785,7 @@ Aggressive control 是为了测 wasted compute／low starvation，不作为推�
 - [x] 接受 `CacheTopology × ExecutionProtocol`，同时加入 validity matrix 和三个显式 coupling。
 - [x] S3／S4 拆开；共享 `CapacityGate`／`BoundedFallback` helper。
 - [x] 接受严格 online 的 `AffinityKeyProxy`；加入 hot-block exclusion 和 family size cap。
-- [x] Centralized Master v1 先严格复刻，再实现 calibrated v2。
+- [x] 中心化 master v1 先严格复刻，再实现 calibrated v2。
 - [x] Phase A 先固定 LRU 排 selector，再扫 Top-2 eviction。
 - [x] D1／D1.5 是 advanced implementation ceiling；D2 只做 gated spike，不直接实现 arbitrary abort。
 - [x] Phase C+ 主报 strict completed goodput，lenient／partial 单列；Phase A 不报 goodput。
@@ -835,7 +835,7 @@ Invariant tests：capacity 不超；pinned 不驱逐；hit 不越过首 miss；l
 - [x] 共用 `BoundedFallback`：primary／secondary range＋LeastWork fail-open。
 - [x] S3 GBPrefixBucket：静态 prefix ownership 薄壳。
 - [x] S4 SessionAffinity：online linker＋hot-block exclusion＋family cap 薄壳。
-- [x] S5 Centralized Master：公式 v1＋top30／similar band／last-selected fairness。
+- [x] S5 中心化 master：公式 v1＋top30／similar band／last-selected fairness。
 - [x] S6 CalibratedTTFT：先用 normalized work model。
 - [x] E0 FIFO、E1 LRU、E2 SLRU、E3 SecondHitAdmission。
 - [x] 每次 selection 保留 component trace，可按 request sample debug。
@@ -945,7 +945,7 @@ M10 结论：replay hardware gate 代码就绪并测试（tooling complete）；
 
 RFC 与 chain mock 部分（本仓库内可交付）：
 
-- [x] selector 接入点单独拍板：向已持有 map 的一方（centralized master／Turbo `CacheAwareScheduler`）投递带版本号的 scoring function，不重复造全局 map。owner 差异在 mock 中可执行：`owner=NONE` 拒绝非 off 模式，Turbo pull 无 push preference 通道；pull 派发循环本身未建模。见 `docs/m11-production-rfc.md` §2。
+- [x] selector 接入点单独拍板：向已持有 map 的一方（中心化 master／Turbo `CacheAwareScheduler`）投递带版本号的 scoring function，不重复造全局 map。owner 差异在 mock 中可执行：`owner=NONE` 拒绝非 off 模式，Turbo pull 无 push preference 通道；pull 派发循环本身未建模。见 `docs/m11-production-rfc.md` §2。
 - [x] Client 保留 request ledger／SLO／grant／continuation owner；WHERE 与 lifecycle 归属分离。`exclude_hosts` 只能来自本请求 failed-leg ledger；admission host 必须等于 owner 选中实例；admission 消耗 selection 与 prefill commit，sibling admission 被拒绝，decode reject 消耗本次 pending admission（同一决策不能重复 reject），因此每个 leg 都是 owner-mediated 且 attempt identity 唯一。见 RFC §3。
 - [x] output 去重只在 `OutputAuthority` fence：decode leg 只持 leg-local seq／identity；旧 epoch／重复／乱序 frame 分计数丢弃；lease 边界推进 epoch，过期 leg 的在飞 frame 被 fence 挡下；`max_rounds` 耗尽同样先推进 fence 再拒绝，过期 leg 不能继续投递；`report_checkpoint` 绑定 reporting leg——无 leg／superseded／sibling 的 report 直接拒绝，checkpoint 只携带 leg-local epoch＋seq。见 RFC §7.5、§7.6。
 - [x] crash 恢复只读持久状态：resume 位点 = durable output-ack，R2 checkpoint 只是 KV 材料；无 durable ack 则 fail closed。epoch 持久 source of truth 是 client durable ledger；controller 视图落后时 D2 fail-open 到 `REPORT_CHECKPOINT`，不抛异常。见 RFC §7.7、§10 Q5／Q6。
@@ -958,7 +958,7 @@ RFC 与 chain mock 部分（本仓库内可交付）：
 
 Production 部分（本次不做，保持未完成）：
 
-- [ ] production MR：改 centralized master 或 Turbo 的实际 selector 代码。
+- [ ] production MR：改 中心化 master 或 Turbo 的实际 selector 代码。
 - [ ] LLMClientV1 侧 `LegRoute` 字段落地与 owner 团队接口对齐。
 - [ ] 真实硬件验证与 canary 执行（依赖 M9／M10）。
 - [ ] D2 开闸评估（RFC §9 R4 独立 gate，当前保持关闭）。
@@ -1042,7 +1042,7 @@ M12 总门 G12：策略按 strict useful-token goodput 排名，cache hit 与 MF
 | Abstraction boundary | 接受，但不是全笛卡尔积 | 增加 validity matrix、capability requirement、三个 coupling |
 | S3／S4 | 拆成 independent selector | 共享 `CapacityGate`／`BoundedFallback`，结果可归因 |
 | Session proxy | 接受 strict online linker | 增加 hot-block exclusion／family cap；主看 skew／staleness |
-| Centralized Master | 先复刻 `0.7`，再 calibrated | v1 是解释 diff 的锚点 |
+| 中心化 master | 先复刻 `0.7`，再 calibrated | v1 是解释 diff 的锚点 |
 | Experiment order | LRU 排 selector，再扫 eviction | 避免全笛卡尔积 |
 | Decode scope | D1／D1.5 是 implementation ceiling | D2 仅在 recovery gate 通过后做 spike |
 | Goodput | strict completed 为主，lenient 为辅 | partial output 永远单列 |

@@ -8,7 +8,7 @@
       "S3_GB_PREFIX_BUCKET"
     ],
     "stop_complex_selectors": [
-      "S5_FLEXLB_TTFT",
+      "S5_CENTRALIZED_MASTER_TTFT",
       "S6_CALIBRATED_TTFT"
     ]
   },
@@ -49,7 +49,7 @@
       "request_load_max_mean": 1.047272111148763,
       "token_weighted_hit_rate": 0.5333664418545412
     },
-    "S5_FLEXLB_TTFT": {
+    "S5_CENTRALIZED_MASTER_TTFT": {
       "offered_load_ratio": 0.38142072511111114,
       "queue_wait_normalized_ms_p95": 6589.078320000111,
       "replica_factor": 1.0607828577490188,
