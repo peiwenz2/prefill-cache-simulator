@@ -1,7 +1,7 @@
 # Prefill Cache Simulator：策略价值与 benchmark 诚实性审计
 
 - 作者：张珮文
-- 证据版本：`prefill-cache-sim@205353a`；M12 final grid 54／54 完成，0 failure；MANIFEST SHA-256 `89d4fb8d26a400d03a33538f2d889d2a3feb3bdf963ea219663d6e2004a69140`
+- 数据与代码证据：`prefill-cache-sim@4a00f10`；报告修订：2026-08-08；M12 final grid 54／54 完成，0 failure；MANIFEST SHA-256 `89d4fb8d26a400d03a33538f2d889d2a3feb3bdf963ea219663d6e2004a69140`
 - 数据集：Mooncake `mooncake_trace.jsonl`，23,608 requests，512-token prefix blocks
 - 证据等级：论文原文＋本地 deterministic replay；真实 GPU／KVT／生产 shadow 仍未完成
 
@@ -486,7 +486,20 @@ S3 的 54.01% 距无限单池 token ceiling 57.07% 约 3.06 pp，但有限多节
 
 ### 5.1 M12 final：高 hit 为什么仍然失败
 
+54 个 cell 不是 54 种可上线策略：45 个 primary＝3 个 cost regime（COMPUTE_BOUND／MEMORY_BOUND／MIXED）×5 个 offered-load scale（0.8×～2.0×）×3 个候选；9 个 sensitivity＝3 个 regime×No-Gate／Oracle／Noised-Oracle，固定在预注册的 1.5× 压力点。Oracle 会偷看未来，只是上界，不能部署。
+
 MIXED 1.5× 是最关键反例：Decode Causal 的 token hit 从 Priced Spill 的 57.06% 提高到 76.11%，但 strict output goodput 相对同一修复代码重跑的 Decode No-Gate 从 0.14036 降到 0.12696，相对下降 9.55%。它把 queue p95 从 5360.22 降到 1503.10，却把 minimum tier attainment 从 0.9358 降到 0.7531，并产生 17,795 次 retry，其中 14,881 次被 gate。结论是：它能作为 overload pressure tool 继续验证，不能声称提高常态吞吐或公平性。
+
+PricedSpill 对 Baseline 只有＋0.266pp hit、＋0.0148% strict output、－0.107% queue p95。更重要的是全部 45 个 primary cells 都是 `capacity_binding=false`：实验没有制造出“缓存塞满后该扔谁”的条件，因此这是 null result，不是证明 PricedSpill 有效或无效。DecodeCausal 的 hit／queue／minimum-tier 变化以 PricedSpill 为对照；strict output 的－9.55% 以 Decode No-Gate 为对照，不能混成同一个 baseline。
+
+### 5.1.1 大规模 distributed PD 的当前选择
+
+- 默认档：真实 session key 版 S4／stable prefix ownership＋bounded load gate。M4 100ms delayed-view 下，它相对 S3 少 0.67pp token 加权命中率，但 load skew 低 42.5%、queue p95 低 3.0%；8 nodes 下少 0.76pp，换来 skew 低 69.5%、queue p95 低 5.4%。
+- Fresh-view 档：只有 cache／queue census 足够新鲜时才考虑 S5／硬件标定后的 S6。0ms 下 S5 相对 S4 多 3.05pp hit、queue p95 低 26.8%，代价是 skew 高 26.3%。目前没有测出生产切换所需的 view-age 阈值。
+- KVS 档：PricedSpill 只进 shadow；现有 grid 没有 capacity binding。
+- Decode overload 档：DecodeCausal 只作 brake；queue p95 低 72%，但 strict output 低 9.55%、minimum tier 低 19.5%。
+
+“S4 先缩域、S5／S6 再终选”是建议的组合架构，但还没有组合 experiment cell；真实 session key 也未验证。所有量化数字只在本 trace＋normalized simulator contract 内成立，不是 production TTFT／MFU 承诺。
 
 | Gate | Verdict | 结论 |
 |---|---|---|

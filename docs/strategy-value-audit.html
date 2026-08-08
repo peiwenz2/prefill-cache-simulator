@@ -145,6 +145,19 @@
         letter-spacing: 0.08em;
         color: var(--accent);
       }
+      .grid2 {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+        margin: 14px 0;
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px;
+        background: var(--surface);
+      }
+      .fine { color: var(--muted); font-size: 13px; }
       ol,
       ul {
         padding-left: 22px;
@@ -279,14 +292,14 @@
           lifecycle。每个策略都回答：代码在哪里、决策怎么走、收益为何出现、在哪些条件下会失败。
         </p>
         <div class="evidence">
-          证据版本：prefill-cache-sim@205353a ｜ 2026-08-08 ｜ M12 final grid
+          数据与代码证据：prefill-cache-sim@4a00f10 ｜ 报告修订：2026-08-08 ｜ M12 final grid
           54／54 cells 完成，0 failure；MANIFEST SHA-256：89d4fb8d26a400d03a33538f2d889d2a3feb3bdf963ea219663d6e2004a69140
         </div>
       </div>
     </header>
     <div class="layout">
       <nav class="anchor-nav">
-        <a href="#data">0．Data Description</a><a href="#arch">1．总体架构</a
+        <a href="#glossary">先读术语</a><a href="#data">0．Data Description</a><a href="#arch">1．总体架构</a
         ><a href="#design">2．详细设计</a><a href="#eval">3．关键技术评估</a
         ><a href="#risk">4．风险与 benchmark</a><a href="#rollout">5．验收门</a
         ><a href="#ref">6．引用</a>
@@ -1053,9 +1066,9 @@
                 <td>当 token 节省率</td>
               </tr>
               <tr>
-                <td>本仓 token-weighted</td>
+                <td>Block-size-weighted token coverage</td>
                 <td>57.070%</td>
-                <td>exact prefix 可省 input tokens</td>
+                <td>命中 blocks 按 512／tail 长度换算的 token positions；不是读取 token 内容</td>
                 <td>当 TTFT／goodput</td>
               </tr>
               <tr>
@@ -1140,6 +1153,12 @@ score = load(node) + request.input_tokens - cache_discount * hit
 # 不是最大化 hit；它在比较 queue work 与 saved prefill work。</pre
           >
           <h3>2.1.1 实验契约：数字在哪个世界成立</h3>
+          <div class="call">
+            <div class="label">先回答最容易误会的地方</div>
+            100ms 不是某个 selector 自己产生的 latency。它是 A1 headline
+            给 S0～S6 的共同 telemetry 条件：selector 最多每 100ms 看到一份新的
+            cluster snapshot。实际 prefill、cache lookup 和 eviction 仍继续运行。
+          </div>
           <table>
             <thead>
               <tr>
@@ -1151,13 +1170,13 @@ score = load(node) + request.input_tokens - cache_discount * hit
             <tbody>
               <tr>
                 <td>Cluster</td>
-                <td>4 nodes；总容量 50,000 blocks</td>
-                <td>每台 local cache 独立，分散会制造副本</td>
+                <td>4 nodes；总容量 50,000 blocks，即 12,500／node</td>
+                <td>N=4；每台 local cache 独立，分散会制造副本</td>
               </tr>
               <tr>
                 <td>Eviction</td>
-                <td>E1 LRU</td>
-                <td>hit 刷新 recency</td>
+                <td>E1 LRU；没有 TTL</td>
+                <td>cache 满才淘汰；hit 刷新 recency；block 不是默认活 10 分钟</td>
               </tr>
               <tr>
                 <td>Visibility</td>
@@ -1167,7 +1186,7 @@ score = load(node) + request.input_tokens - cache_discount * hit
               <tr>
                 <td>View</td>
                 <td><strong>100ms delayed snapshot</strong></td>
-                <td>load、cache estimate、last-selected 都会 stale</td>
+                <td>active／queued uncached work、cache estimate、last-selected 都会 stale</td>
               </tr>
               <tr>
                 <td>Metric</td>
@@ -1176,13 +1195,38 @@ score = load(node) + request.input_tokens - cache_discount * hit
               </tr>
             </tbody>
           </table>
+          <table>
+            <thead><tr><th>问题</th><th>准确答案</th><th>代码／证据</th></tr></thead>
+            <tbody>
+              <tr><td>100ms 对所有策略都一样吗？</td><td>对。A1 的 S0～S6 共用同一配置；但 Random／RR 不读 load，所以对 delay 不敏感。这是公平的 controlled condition，不是对算法完全中立。</td><td><code>run_m4.py:30-56</code></td></tr>
+              <tr><td>旧 snapshot 到底旧什么？</td><td>旧的是 selector 的观察。执行时真正 cache lookup 仍用当时 resident state；不会把旧 view 当成真实 hit。</td><td><code>simulator.py:227-266</code></td></tr>
+              <tr><td>Cache 什么时候写入？</td><td>请求 prefill 完成后才写。并发中的相同 prefix 不会提前计 hit。</td><td><code>CacheVisibility.INSERT_AT_COMPLETION</code></td></tr>
+              <tr><td>Block 活多久？</td><td>没有固定 lifetime。未满时留到模拟结束；满了按 LRU capacity pressure 淘汰。</td><td><code>cache.py:106-151</code></td></tr>
+              <tr><td>Queue p95 是 3,103ms 吗？</td><td>不是。M4 是 normalized token-work；只能比较大小，不能当 production latency。</td><td><code>prefill_uncached_token_ms=0.0568</code> 是 synthetic coefficient</td></tr>
+            </tbody>
+          </table>
+          <div class="call warn">
+            <div class="label">公平，但不是唯一世界</div>
+            同一 100ms 条件能公平比较“谁更抗 stale view”，却不能证明生产 view
+            就是 100ms。M4 另外跑了 0／50／500／5,000ms sensitivity；ranking
+            会变，所以 production 必须先测真实 refresh＋RPC delay。
+          </div>
+          <h3>2.1.1A S0／S1／S2：为什么朴素策略也必须保留</h3>
+          <table>
+            <thead><tr><th>策略</th><th>每次请求怎么选</th><th>它证明什么</th><th>100ms headline 结果</th></tr></thead>
+            <tbody>
+              <tr><td>S0 Random</td><td>在 alive nodes 中均匀随机；seed=713 让 replay 可复现。</td><td>不带 cache／load intelligence 的 baseline。</td><td>44.30% coverage；load 1.013；queue p95 4,097</td></tr>
+              <tr><td>S1 RoundRobin</td><td>p0→p1→p2→p3 循环；只平衡 request count。</td><td>request 数平衡不等于 token-work 平衡。</td><td>44.25%；request load 1.000；queue p95 3,876</td></tr>
+              <tr><td>S2 LeastWork</td><td>选 snapshot 中 <code>active＋queued uncached tokens</code> 最小的 node。</td><td>动态 load score 遇到 stale view 会 herd：一批请求同时追旧的“最闲 node”。</td><td>43.67%；load 1.012；queue p95 8,061</td></tr>
+            </tbody>
+          </table>
           <h3>2.1.2 S3 GBPrefixBucket：对应哪段代码</h3>
           <div class="call good">
             <div class="label">精确映射</div>
             S3 就是 <code>selectors.py:182-194</code> 的
             <code>gb_prefix_bucket_selector()</code
-            >：<code>PrefixAnchor(k=2)</code>＋<code>CapacityGate(1.25)</code>＋最多两个
-            secondary nodes 的 <code>BoundedFallback</code>。
+            >：<code>PrefixAnchor(k=2)</code>＋<code>CapacityGate(1.25)</code>＋logical
+            ring 上两个 secondary candidates 的 <code>BoundedFallback</code>。
           </div>
           <div class="figure">
             <svg
@@ -1215,10 +1259,10 @@ score = load(node) + request.input_tokens - cache_discount * hit
                   stroke="#4338ca"
                 />
                 <text x="90" y="94" text-anchor="middle" font-weight="700">
-                  第 k 个 prefix
+                  第 k 个 chained hash
                 </text>
                 <text x="90" y="114" text-anchor="middle" font-size="11">
-                  M4：k=2
+                  k=2＝前 1,024 tokens
                 </text>
                 <rect
                   x="215"
@@ -1230,7 +1274,7 @@ score = load(node) + request.input_tokens - cache_discount * hit
                   stroke="#4338ca"
                 />
                 <text x="290" y="94" text-anchor="middle" font-weight="700">
-                  SHA256 % N
+                  SHA256(key) % N
                 </text>
                 <text x="290" y="114" text-anchor="middle" font-size="11">
                   stable owner
@@ -1268,10 +1312,10 @@ score = load(node) + request.input_tokens - cache_discount * hit
                   stroke="#8a93a3"
                 />
                 <text x="745" y="169" text-anchor="middle" font-weight="700">
-                  相邻 2 nodes
+                  ring 后续 2 nodes
                 </text>
                 <text x="745" y="189" text-anchor="middle" font-size="11">
-                  否则 cluster least-work
+                  不是 cache top-2
                 </text>
                 <path
                   d="M165 99L215 99M365 99L380 99M570 82L635 54M570 116L635 174"
@@ -1282,10 +1326,34 @@ score = load(node) + request.input_tokens - cache_discount * hit
               </g>
             </svg>
             <div class="caption">
-              相同 prefix 回到 stable owner，replica factor 降到 1.045；热 owner
+              相同 prefix 回到 stable owner，replica factor（同一 block 平均存在于几台 node；1.0 表示没有重复副本）降到 1.045；热 owner
               也导致 load max／mean=1.822。
             </div>
           </div>
+          <table>
+            <thead><tr><th>图里的词</th><th>翻译成人话</th><th>不是</th></tr></thead>
+            <tbody>
+              <tr><td><code>k=2</code></td><td>取 <code>hash_ids[1]</code>。它是 chained hash，所以代表前两块，也就是前 1,024-token prefix。短请求取自己的最后一块。</td><td>不是两个 nodes；不是 top-2 hits</td></tr>
+              <tr><td><code>N</code></td><td>当前 alive prefill node 数；headline 中 N=4，对应 p0～p3。</td><td>不是 hash 数；不是 replica 数</td></tr>
+              <tr><td><code>SHA256 % N</code></td><td>把 anchor key 均匀映射成稳定 owner index。Mooncake hash 已判断 prefix 相同；这里再 hash 只负责分桶。</td><td>不是重新比较 token 内容</td></tr>
+              <tr><td><code>load</code></td><td><code>active_uncached_tokens＋queued_uncached_tokens</code>。表示当前正在算和排队等待算的 token-work。</td><td>不是 block count；不是 request count；不是历史 input 总量</td></tr>
+              <tr><td><code>1.25×mean</code></td><td>owner load 大于集群平均 load 的 1.25 倍，就 break affinity。1.25 是 preset heuristic，没有在 M4 sweep。</td><td>不是测出的 production 最优值</td></tr>
+              <tr><td>ring 后续 2 nodes</td><td>若 owner=p2、node order=[p0,p1,p2,p3]，候选就是 p3、p0；在它们中选 least-work。都过载时才查全 cluster。</td><td>不是机架相邻；不是网络近；不是 hit 排名</td></tr>
+            </tbody>
+          </table>
+          <h4>k=2 是怎么来的：同一 trace 上做过 sweep</h4>
+          <table>
+            <thead><tr><th>k</th><th>Anchor prefix</th><th>Token coverage</th><th>Load max／mean</th><th>Queue p95</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td>512 tokens</td><td>45.18%</td><td>1.666</td><td>7,747</td></tr>
+              <tr class="best"><td>2</td><td>1,024 tokens</td><td><strong>54.01%</strong></td><td>1.822</td><td>3,103</td></tr>
+              <tr><td>4</td><td>2,048 tokens</td><td>53.61%</td><td>1.834</td><td>3,214</td></tr>
+              <tr><td>8</td><td>4,096 tokens</td><td>53.28%</td><td>1.984</td><td>3,227</td></tr>
+              <tr><td>12</td><td>6,144 tokens</td><td>53.12%</td><td>2.006</td><td>2,937</td></tr>
+              <tr><td>16</td><td>8,192 tokens</td><td>51.96%</td><td>1.055</td><td>3,098</td></tr>
+            </tbody>
+          </table>
+          <div class="call warn"><div class="label">不要把调参写成定律</div>k=2 是这份 trace、这组候选、同一评估集上的最高 hit，不是 held-out validation。k=1 太容易把公共 system prompt 聚成热点；k 太大又会把相关请求拆得太细。线上应把 k 当 workload parameter。</div>
           <table>
             <thead>
               <tr>
@@ -1332,6 +1400,15 @@ score = load(node) + request.input_tokens - cache_discount * hit
               key；当前结果不能叫真实 session 收益。
             </li>
           </ol>
+          <table>
+            <thead><tr><th>参数</th><th>M4 值</th><th>作用</th><th>来源／风险</th></tr></thead>
+            <tbody>
+              <tr><td><code>minimum_shared_blocks</code></td><td>2</td><td>至少共享前 1,024-token block boundaries 才考虑同 family。</td><td>preset；不是 trace 的真实 session label</td></tr>
+              <tr><td><code>family_size_cap</code></td><td>128</td><td>一个 inferred family 满 128 requests 后切新 family，限制热点。</td><td>跑过 8／32／128／512 sensitivity</td></tr>
+              <tr><td><code>hot_block_percentile</code></td><td>99</td><td>只由超热公共 blocks 构成的 prefix 不作为 session 证据。</td><td>每 256 requests 在线刷新；跑过 90／95／99／100</td></tr>
+              <tr><td><code>sticky</code></td><td>true</td><td>同 family 尽量回上一次 owner；owner 过载仍可 break。</td><td>production 应换 privacy-safe real session key</td></tr>
+            </tbody>
+          </table>
           <h3>2.1.4 S5 FlexLB TTFT：为什么中心化策略看起来较差</h3>
           <pre>
 load = running_tokens + queued_uncached_tokens
@@ -1341,6 +1418,15 @@ score = load + input_tokens - 0.7 × estimated_local_hit_tokens</pre
             主因不是公式，而是 stale-view herding。S5 在 fresh view
             下同时拿到更高 hit 和更低 queue；50ms 后 queue 已放大 5.4 倍。
           </p>
+          <table>
+            <thead><tr><th>参数／动作</th><th>M4 值</th><th>准确含义</th></tr></thead>
+            <tbody>
+              <tr><td><code>cache_discount</code></td><td>0.7</td><td>估计命中 1 token，只从 score 扣 0.7 token-work；跑过 0.25／0.7／1.0／2.0。</td></tr>
+              <tr><td><code>top_fraction</code></td><td>0.3</td><td>4 nodes 时先保留 score 最好的 2 个，因为 <code>ceil(4×0.3)=2</code>。</td></tr>
+              <tr><td><code>similar_band_ratio</code></td><td>0.1</td><td>只在 best score＋10% band 内做 tie-break；跑过 0.01／0.05／0.1／0.2。</td></tr>
+              <tr><td>Tie-break</td><td>least recently selected</td><td>近似 Global Batching 的 anti-herding，但它也来自 delayed snapshot。</td></tr>
+            </tbody>
+          </table>
           <table>
             <thead>
               <tr>
@@ -1377,6 +1463,7 @@ score = load + input_tokens - 0.7 × estimated_local_hit_tokens</pre
               </tr>
             </tbody>
           </table>
+          <p class="fine">同一 0ms contract 的 S4 对照是：hit 49.96%、load max／mean 1.006、queue p95 1668。因此 S5 的＋3.05pp／－26.8% queue／＋26.3% skew 都是在 fresh-view 对 fresh-view，不是拿 S5@0ms 与 S4@100ms 比。</p>
           <div class="figure">
             <svg
               viewBox="0 0 900 285"
@@ -1428,6 +1515,7 @@ score_ms = (queue_tokens + uncached) × prefill_uncached_token_ms</pre
             后可以直接替换。 M4 hit=53.37%、load max／mean=1.269，但 queue p95
             仍为 6393。 它改善了 score 的可标定性，没有修复输入 freshness。
           </p>
+          <div class="call warn"><div class="label">名字里有 Calibrated，不代表已硬件校准</div>M4 使用 <code>0.0568 normalized ms／uncached token</code>，它是 synthetic service coefficient。只有 M9-HW 用真实 engine 测出 prefill／KVT／overlap 后，score 才能称为 hardware-calibrated TTFT。</div>
           <h3>2.1.6 M4 与 M12：同名策略不可直接横比</h3>
           <table>
             <thead>
@@ -1448,7 +1536,7 @@ score_ms = (queue_tokens + uncached) × prefill_uncached_token_ms</pre
               <tr>
                 <td>View</td>
                 <td>100ms delayed</td>
-                <td>causal exact</td>
+                <td>causal exact：只看该时刻之前已发生的真实状态；无延迟、不偷看未来</td>
                 <td>M12 移除 S5 的主要弱点</td>
               </tr>
               <tr>
@@ -1681,7 +1769,7 @@ effective = max(non_overlapped, recompute_work)</pre
               </tr>
               <tr>
                 <td>D1.5 Adaptive</td>
-                <td>boundary 12.92→4.95</td>
+                <td>boundary wait（normalized work）12.92→4.95</td>
                 <td>只在压力时介入</td>
                 <td>pressure 未标定</td>
               </tr>
@@ -1727,7 +1815,7 @@ if move_score - keep_score &gt; safety_margin: abort_self
                 <td>2</td>
                 <td>Gated-PD</td>
                 <td>0.4883→0.6870</td>
-                <td>NORMALIZED_WORK</td>
+                <td>NORMALIZED_WORK（协议实验自己的归一化 work；不可与 M12 的 0.14 横比）</td>
                 <td>收益随风险权重可变号</td>
               </tr>
               <tr>
@@ -1823,6 +1911,51 @@ if move_score - keep_score &gt; safety_margin: abort_self
             selector 不必为命中粘死热点；SLO gate 判断 transfer 是否值得；lease
             只在压力下减少 HoL。它们是一个控制闭环的不同环节。
           </div>
+          <h3>3.2 如果这是大规模 distributed PD：到底选哪个</h3>
+          <div class="call good">
+            <div class="label">直接答案</div>
+            没有一个 selector 在所有条件下都 better。当前最可落地的 default 是：
+            <strong>S4-style SessionAffinity／stable prefix ownership＋bounded load gate</strong>；
+            当 global view 足够 fresh，再让 SLO／KVS cost-aware selector 在小候选集内做 final choice。
+            S3 用来测 locality ceiling，不建议单独做大集群 production default。上线前必须把 trace proxy 换成 privacy-safe 的真实 session key。
+          </div>
+          <div class="figure">
+            <svg viewBox="0 0 980 300" width="100%" role="img" aria-label="大规模分布式 PD 的分层选择策略">
+              <defs><marker id="dist-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#64748b"/></marker></defs>
+              <g font-family="-apple-system,PingFang SC" fill="#172033">
+                <rect x="20" y="105" width="150" height="70" rx="9" fill="#eef0fe" stroke="#4338ca"/><text x="95" y="135" text-anchor="middle" font-weight="700">Request</text><text x="95" y="157" text-anchor="middle" font-size="12">prefix＋session＋SLO</text>
+                <rect x="220" y="35" width="200" height="78" rx="9" fill="#e9f6ec" stroke="#15803d"/><text x="320" y="67" text-anchor="middle" font-weight="700">Stable ownership</text><text x="320" y="91" text-anchor="middle" font-size="12">real session／prefix family</text>
+                <rect x="220" y="185" width="200" height="78" rx="9" fill="#fdf3e3" stroke="#b45309"/><text x="320" y="217" text-anchor="middle" font-weight="700">Safety gate</text><text x="320" y="241" text-anchor="middle" font-size="12">hard cap＋1.25×mean 软阈值</text>
+                <rect x="485" y="105" width="210" height="70" rx="9" fill="#eef0fe" stroke="#4338ca"/><text x="590" y="135" text-anchor="middle" font-weight="700">Fresh-view cost rank</text><text x="590" y="157" text-anchor="middle" font-size="12">queue＋recompute＋KVT＋SLO</text>
+                <rect x="760" y="105" width="190" height="70" rx="9" fill="#e9f6ec" stroke="#15803d"/><text x="855" y="135" text-anchor="middle" font-weight="700">Selected P node</text><text x="855" y="157" text-anchor="middle" font-size="12">fallback 可解释</text>
+                <path d="M170 140L205 140L205 74L220 74M170 140L205 140L205 224L220 224M420 74L455 74L455 140L485 140M420 224L455 224L455 140M695 140L760 140" fill="none" stroke="#64748b" stroke-width="2" marker-end="url(#dist-arrow)"/>
+              </g>
+            </svg>
+            <div class="caption">这张图回答：stable ownership 与 FlexLB 不是二选一。前者先缩小 locality domain，后者只在可信 fresh view 下做最后比价。</div>
+          </div>
+          <table>
+            <thead><tr><th>运行条件</th><th>推荐 mode</th><th>为什么</th><th>当前 evidence</th></tr></thead>
+            <tbody>
+              <tr><td>View stale／丢失／跨 region</td><td><strong>Real-session S4＋bounded gate</strong></td><td>stable ownership 不会让一批请求同时追旧的最优 node；比 S3 更能限制热点。</td><td>4-node 100ms：只少 0.67pp coverage，load skew 低 42.5%，queue p95 低 3.0%</td></tr>
+              <tr><td>View fresh 且 cache census（各 node 缓存内容的控制面快照）可信</td><td><strong>S5／hardware-calibrated S6</strong></td><td>此时可以比较 queue、uncached work 与 KVT cost；但目前没有测出“低于多少 ms 才算 fresh”的切换阈值。</td><td>4-node 0ms：S5 比 S4 多 3.05pp coverage、queue p95 低 26.8%，但 load skew 高 26.3%</td></tr>
+              <tr><td>Node 数增大</td><td><strong>S4，不单独用 S3</strong></td><td>纯 prefix owner 会把超热 prefix 映射成单点热点。</td><td>8 nodes：S4 只少 0.76pp coverage，load skew 比 S3 低 69.5%，queue p95 低 5.4%</td></tr>
+              <tr><td>Remote KVS 可用</td><td><strong>PricedSpill shadow</strong></td><td>让空闲 node 搬 KV，而不是必须粘 owner；但价格函数尚未证明有 deployment gain。</td><td>M12 MIXED 1.5×：＋0.266pp hit，output goodput 仅＋0.0148%，queue p95 仅－0.107%</td></tr>
+              <tr><td>D stream overload</td><td><strong>Decode Causal overload-only</strong></td><td>能快速降 queue，但 retry 会制造额外 work，并伤害 strict tier。</td><td>queue p95－72.0%，但 output goodput－9.55%，minimum tier－19.5%，attempts＋75.4%</td></tr>
+            </tbody>
+          </table>
+          <p class="fine">8-node raw 对照（<code>results/m4/results.csv</code>）：S3 hit 55.7768%、skew 3.410、queue p95 1618.93；S4 hit 55.0138%、skew 1.039、queue p95 1532.00。正文的－0.76pp／－69.5%／－5.4% 均由这组未舍入值计算。</p>
+          <h3>3.3 “Better”必须同时回答四个维度</h3>
+          <table>
+            <thead><tr><th>维度</th><th>我们量什么</th><th>只看它会犯什么错</th></tr></thead>
+            <tbody>
+              <tr><td>Reuse</td><td>Block-ref hit／block-size-weighted token coverage／replica factor</td><td>S3 hit 高，但可能形成热点；retry 也能虚增 hit</td></tr>
+              <tr><td>Throughput</td><td>Strict output goodput／completed goodput</td><td>减少 queue 不代表完成更多有效输出</td></tr>
+              <tr><td>SLO／fairness</td><td>Queue p95／minimum tier attainment／Jain 公平指数（1.0 表示各租户最均匀）</td><td>平均值好看时，严格租户仍可能失败</td></tr>
+              <tr><td>Operational safety</td><td>View age／fallback rate／missing census／work reconciliation</td><td>模拟中 oracle data 可用，不代表生产控制面也拿得到</td></tr>
+            </tbody>
+          </table>
+          <div class="call warn"><div class="label">组合架构目前是设计假说</div>S4 先缩小 locality domain、S5／S6 再做 final rank 这一组合还没有对应的 experiment cell；表里的数字来自各单策略对照，不能相加。真实 session key 版 S4 也尚未跑过，当前 S4 只使用 trace proxy。它们是下一步 R1 shadow 要验证的 architecture，不是已经证明的 production winner。</div>
+          <div class="call warn"><div class="label">Production claim 现在到哪一步</div><ul><li>M4 能排序 stale-view robustness，不给真实 QPS／ms。</li><li>M12 能 kill broad Decode／eviction claims，不证明 production winner。</li><li>R1 shadow 要测 real session key、view age、fallback 与 production headroom。</li><li>M9／M10-HW 要把 normalized cost 换成真实 prefill、KVT、TTFT／TBT。</li></ul></div>
         </section>
 
         <section id="risk">
@@ -1944,6 +2077,23 @@ if move_score - keep_score &gt; safety_margin: abort_self
             >。它符合策略 benchmark 的基本纪律，但还不是 Mooncake hardware
             reproduction。
           </div>
+          <h3>4.3 隐藏参数总表：看到 headline 前先看这些</h3>
+          <table>
+            <thead><tr><th>参数／假设</th><th>当前值</th><th>它会影响什么</th><th>当前证据边界</th></tr></thead>
+            <tbody>
+              <tr><td>Node 数／总 cache</td><td>M4 headline：4 nodes／50,000 blocks；每 node 12,500</td><td>分片越多，locality 和热点风险都改变</td><td>另跑过 2／8 nodes；不是弹性大集群模型</td></tr>
+              <tr><td>Eviction／TTL</td><td>LRU；hit renew；<strong>无 TTL</strong></td><td>block 只因容量淘汰，不因“10 分钟到期”消失</td><td>不能当 GPU／DRAM 的真实生命周期</td></tr>
+              <tr><td>Visibility</td><td>request 完成后插入；M4 headline 的控制面 view 延迟 100ms</td><td>selector 看到旧 snapshot，但真正 lookup 仍用当下 cache</td><td>公平地施加给所有 S0～S6；不代表额外增加 100ms TTFT</td></tr>
+              <tr><td>PrefixAnchor</td><td>k=2＝<code>hash_ids[1]</code>＝前 1,024 tokens 的 chained hash</td><td>决定哪些请求粘到同一 owner</td><td>同 trace sweep 选出；有过拟合风险</td></tr>
+              <tr><td>CapacityGate</td><td>alpha=1.25；load＝running＋queued uncached token-work</td><td>owner 超过 mean 的 1.25 倍时才 fallback</td><td>不是 block 数／request 数；alpha 未做硬件标定</td></tr>
+              <tr><td>Fallback</td><td>stable owner 后逻辑 ring 的两个 node</td><td>限制 replica 扩散和搜索开销</td><td>不是物理相邻，也不是 cache top-2</td></tr>
+              <tr><td>SessionAffinity</td><td>共享块≥2；每 session 记录≤128；hot=P99</td><td>把连续会话导回已有 KV 的 node</td><td>session key 是 trace proxy，不是真实 user／conversation id</td></tr>
+              <tr><td>FlexLB freshness</td><td>重点只比较 0ms 与 100ms；另有较粗 sensitivity 点</td><td>决定 cache-aware score 能否相信</td><td>证明排序会翻转；没有找到 production 的 X ms 阈值</td></tr>
+              <tr><td>Hit ceiling</td><td>single-global、infinite-capacity、no-expiry；block ceiling 55.26%，weighted coverage 57.07%</td><td>只回答 trace 内可重复 prefix 上限</td><td>不是多节点 selector 可直接实现的目标，更不是 TTFT improvement</td></tr>
+              <tr><td>M12 retry 口径</td><td>offered requests 保持 23,608；attempt 可因 retry 增加</td><td>防止把 retry 产生的 cache hit 当免费收益</td><td>必须与 completed／strict output goodput 同框读</td></tr>
+            </tbody>
+          </table>
+          <div class="call warn"><div class="label">硬件与 shadow 仍是空白</div>M9-HW／M10-HW 尚未把 normalized prefill、KVT、queue 换成真实 GPU 的 TTFT／TBT／MFU；R1 production shadow 也尚未给出真实 session key、view age 与 fallback rate。因此正文中的百分比全部限定为“本 trace＋本 simulator contract 内”，不能写成上线收益承诺。</div>
         </section>
 
         <section id="rollout">
@@ -1984,7 +2134,7 @@ if move_score - keep_score &gt; safety_margin: abort_self
                 <td>4</td>
                 <td>M10-HW</td>
                 <td class="risk">harness only</td>
-                <td>M9 后真实压力 tau-b gate</td>
+                <td>M9 后真实压力 Kendall tau-b gate（两轮策略排名的一致性系数）</td>
               </tr>
               <tr>
                 <td>线 C 并行</td>
@@ -2027,6 +2177,20 @@ if move_score - keep_score &gt; safety_margin: abort_self
             strict output goodput 则相对同一修复代码重跑的 Decode No-Gate
             从 0.14036 降到 0.12696，下降 9.55%。
           </div>
+          <h3>5.1.1 先拆开 54：不是 54 种可以上线的策略</h3>
+          <table>
+            <thead><tr><th>组成</th><th>怎么算</th><th>它回答什么</th><th>能否部署</th></tr></thead>
+            <tbody>
+              <tr><td>45 个 primary cells</td><td>3 个 cost regime × 5 个 offered-load scale × 3 个候选</td><td>在不同瓶颈和压力下，Baseline、PricedSpill、DecodeCausal 的多维结果</td><td>只是 simulator candidate；通过 gate 也仍需 shadow／hardware</td></tr>
+              <tr><td>9 个 sensitivity cells</td><td>3 个 regime × 3 个 Decode 对照；固定在 1.5×</td><td>No-Gate、Oracle、Noised-Oracle 用来定位 gate 的信息价值与代价</td><td><strong>不能</strong>；Oracle 看得到未来，只是上界</td></tr>
+              <tr class="best"><td>合计</td><td>45＋9＝54；failure＝0</td><td>完整 falsification grid</td><td>不是 54 个 production experiments</td></tr>
+            </tbody>
+          </table>
+          <div class="grid2">
+            <div class="card"><div class="label">3 个 regime 是什么</div><ul><li><strong>COMPUTE_BOUND：</strong>prefill／decode 计算先成为瓶颈。</li><li><strong>MEMORY_BOUND：</strong>KV capacity／memory price 更重要。</li><li><strong>MIXED：</strong>计算、内存和 queue 同时竞争；最接近我们想找的系统级冲突。</li></ul></div>
+            <div class="card"><div class="label">5 个 scale 是什么</div><ul><li>0.8×、1.0×、1.2×、1.5×、2.0× 是同一 trace 的 offered-load 倍率。</li><li>它不是 GPU 数，也不是模型 batch size。</li><li>1.5× 是预先选择的 overload sensitivity 点，不是看到结果后再挑的最好 case。</li></ul></div>
+          </div>
+          <div class="call warn"><div class="label">最容易读错的地方</div><ul><li><strong>Token hit 高，不等于完成更多请求。</strong>retry 可以再次访问相同 prefix，从而把 hit 数抬高。</li><li><strong>Queue p95 不是毫秒。</strong>它是 frozen simulator 的 normalized work。</li><li><strong>Strict output goodput 不是 requests／s。</strong>它只用于同一 experiment contract 内比较 SLO 内完成的 output work。</li></ul></div>
           <svg role="img" aria-label="M12 从请求到多维验收门的流程图" viewBox="0 0 980 210">
             <defs><marker id="m12-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#64748b"/></marker></defs>
             <g fill="#eef2ff" stroke="#4338ca" stroke-width="2">
@@ -2037,12 +2201,13 @@ if move_score - keep_score &gt; safety_margin: abort_self
             <g font-size="15" text-anchor="middle" fill="#172033">
               <text x="95" y="94">Frozen trace</text><text x="95" y="118">23,608 requests</text>
               <text x="300" y="94">Placement</text><text x="300" y="118">Baseline／Priced Spill</text>
-              <text x="510" y="94">Decode lifecycle</text><text x="510" y="118">credits／retry／gate</text>
+              <text x="510" y="94">Decode lifecycle</text><text x="510" y="118">名额记账／retry／gate</text>
               <text x="715" y="94">统一记账</text><text x="715" y="118">work／SLO／fairness</text>
               <text x="900" y="94">Gate</text><text x="900" y="118">pass／narrow／kill</text>
             </g>
             <g stroke="#64748b" stroke-width="2" marker-end="url(#m12-arrow)"><line x1="170" y1="102" x2="215" y2="102"/><line x1="380" y1="102" x2="425" y2="102"/><line x1="590" y1="102" x2="635" y2="102"/><line x1="790" y1="102" x2="835" y2="102"/></g>
           </svg>
+          <div class="call"><div class="label">Causal、Oracle、gated 分别是什么意思</div><ul><li><strong>Causal：</strong>只用当前时刻已经发生、已经可见的信息做 gate 决策，不偷看未来。</li><li><strong>Oracle：</strong>能看到未来结果，只用于测“信息完美时的理论上界”，不能部署。</li><li><strong>Credits：</strong>decode admission 名额的记账；名额不足时 gate 可以拒绝 attempt。</li><li><strong>Gated：</strong>被 gate 拒绝进入 decode、需要重新排队的 attempt。一次请求可 retry 多次，所以它不是 unique request 数。</li></ul></div>
           <table>
             <thead><tr><th>MIXED 1.5×</th><th>Baseline</th><th>Priced Spill</th><th>Decode No-Gate</th><th>Decode Causal</th><th>怎么读</th></tr></thead>
             <tbody>
@@ -2053,6 +2218,17 @@ if move_score - keep_score &gt; safety_margin: abort_self
               <tr><td>Attempts／retries／gated</td><td>23,608／0／0</td><td>23,608／0／0</td><td>23,608／0／0</td><td>41,403／17,795／14,881</td><td>不能把 retry 产生的额外 hit 当免费收益</td></tr>
             </tbody>
           </table>
+          <h3>5.1.2 三种 cost regime 在 1.5× 下发生了什么</h3>
+          <table>
+            <thead><tr><th>Regime</th><th>Baseline strict output</th><th>PricedSpill</th><th>DecodeCausal</th><th>白话结论</th></tr></thead>
+            <tbody>
+              <tr><td>COMPUTE_BOUND</td><td>0.138813</td><td>0.138851</td><td>0.138851；DEFER</td><td>gate 没有发现值得介入的因果压力；退回 placement 结果</td></tr>
+              <tr><td>MEMORY_BOUND</td><td>0.136600</td><td>0.136580</td><td>0.136580；DEFER</td><td>仍没有 capacity-binding cell；不能评价 cluster eviction 的价值</td></tr>
+              <tr class="best"><td>MIXED</td><td>0.140342</td><td>0.140363</td><td>0.126958；action=<code>GATED_DP</code></td><td>这是 M12 cell 的 Decode gate action 标签，不是 2.4 的协议模式 GATED_PD；只有混合过载触发它</td></tr>
+            </tbody>
+          </table>
+          <div class="call"><div class="label">M12 真正找到的不是 winner，而是作用域</div><ul><li><strong>PricedSpill 对 Baseline：</strong>MIXED 1.5× hit ＋0.266pp，strict output 仅＋0.0148%，queue p95 仅－0.107%。这是“几乎量不出来”，只够进 shadow。</li><li><strong>为什么不能说 PricedSpill 没用：</strong>45 个 primary cells 全部 <code>capacity_binding=false</code>。它本来解决“缓存塞满后该扔谁”，实验却没把缓存塞满；这是 null result，不是 negative result。</li><li><strong>DecodeCausal 对 PricedSpill：</strong>hit ＋19.04pp、queue p95 －71.96%、minimum tier －19.52%，并制造 17,795 retries；<strong>对 Decode No-Gate：</strong>strict output －9.55%。它是 overload brake，不是常态吞吐引擎。</li></ul></div>
+          <p class="fine">百分比变化均由 artifact 的未舍入原值计算，因此用表中两位小数心算可能相差 0.01pp。</p>
           <h3>5.2 Gate verdict 与可以／不可以说的话</h3>
           <table>
             <thead><tr><th>Gate</th><th>最终 verdict</th><th>可发布结论</th><th>禁止结论</th></tr></thead>
@@ -2062,6 +2238,7 @@ if move_score - keep_score &gt; safety_margin: abort_self
               <tr><td>Pareto／attribution</td><td class="best">COMPLETE</td><td>15 个 regime×scale group 均有完整候选集判定；首次分歧可追踪</td><td>不能把 normalized result 写成生产 MFU／毫秒</td></tr>
             </tbody>
           </table>
+          <div class="call warn"><div class="label">为什么 G12-4 是 KILL_OR_NARROW</div><code>g12-4.json</code> 中 <code>cells=[]</code>，不是程序漏跑，而是完整 grid 里没有任何 capacity-binding cell 可以进入该 gate。正确动作是补一个真的把 cache 推到容量边界的 experiment；在那之前既不能说 eviction 有效，也不能说它无效。</div>
           <div class="grid2">
             <div class="card"><div class="label">数据完整性</div><ul><li>45 primary＋9 sensitivity，0 failure。</li><li>45 constraints＋45 explanation＋45 visibility audit。</li><li>16 个 artifact hash 与 MANIFEST 全部匹配。</li></ul></div>
             <div class="card"><div class="label">修复 provenance</div><ul><li>修复前 base 有 53 个 cell；新代码重跑缺失的 Decode Causal 与 No-Gate 对照，最终保留 52 个旧代码 cell。</li><li>4 个 retained samples 做 row＋decision fingerprint invariance。</li><li>头条 cell 来自 da59431 的 oversized reservation 串行化修复；混合来源与 affected-group recompute 写入 repair evidence。</li></ul></div>
@@ -2086,7 +2263,7 @@ if move_score - keep_score &gt; safety_margin: abort_self
               M12.1 已冻结 tier≥0.80、Jain≥0.90、relative regression≤0.02。
             </li>
             <li>
-              M12.2 epsilon 冻结为 hit 0.1pp、max／mean +0.05、P queue p95 +5%。
+              M12.2 的等价判定容差（epsilon）冻结为 hit 0.1pp、max／mean +0.05、P queue p95 +5%；小于容差视为打平。
             </li>
             <li>
               M12.3 已触发 narrow：MIXED 1.5× 下 strict output goodput 相对
