@@ -1,4 +1,6 @@
-# M12 Metric Contract v1.1
+# M12 Metric Contract v1.1（历史版本）
+
+> 本文件只用于复现旧 artifacts，已由 `m12-metric-contract-v1.2.md` 取代。不要把本页的 `0.0568` 或 byte-priced KVS 与新结果混用。
 
 状态：FROZEN FOR SYNTHETIC EVALUATION  
 Truth basis：`SYNTHETIC_SERVICE_REGIME`  

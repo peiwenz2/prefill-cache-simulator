@@ -674,10 +674,10 @@ def _case_cost(
     }[case.kvs_mode]
     return FrozenKernelCostModel(
         case.regime.prefill_token_work,
-        case.regime.kvs_byte_work
+        case.regime.kvs_token_work
         * multiplier
         * (case.kvs_contention_multiplier if include_contention else 1.0),
-        1,
+        case.regime.kvs_bytes_per_token,
         case.regime.decode_token_work * (4 if case.decode_binding else 1),
     )
 

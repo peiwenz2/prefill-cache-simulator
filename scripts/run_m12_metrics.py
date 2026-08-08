@@ -156,7 +156,7 @@ def main() -> int:
         ).to_dict()
 
     contract = {
-        "schema_version": "m12-metric-contract-v1.1",
+        "schema_version": "m12-metric-contract-v1.2",
         "truth_basis": "SYNTHETIC_SERVICE_REGIME",
         "primary_metric": "strict_useful_token_goodput",
         "efficiency_metric": "strict_useful_tokens_per_gpu_work",

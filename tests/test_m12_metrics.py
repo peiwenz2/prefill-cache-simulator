@@ -281,6 +281,22 @@ def test_service_regimes_are_positive_monotone_and_distinct() -> None:
     assert len(curves) == len(SERVICE_REGIMES)
 
 
+def test_v1_2_regime_costs_are_round_and_kvs_bytes_are_accounting_only() -> None:
+    by_id = {regime.regime_id: regime for regime in SERVICE_REGIMES}
+    expected = {
+        ServiceRegimeId.COMPUTE_BOUND: (0.08, 1.0, 0.01),
+        ServiceRegimeId.MEMORY_BOUND: (0.04, 1.4, 0.02),
+        ServiceRegimeId.MIXED: (0.06, 1.0, 0.01),
+    }
+    for regime_id, (prefill, decode, remote) in expected.items():
+        regime = by_id[regime_id]
+        assert regime.prefill_token_work == prefill
+        assert regime.decode_token_work == decode
+        assert regime.kvs_token_work == remote
+        assert regime.kvs_bytes_per_token == 65_536
+        assert regime.kvs_work(65_536) == remote
+
+
 def test_invalid_waste_and_completion_shapes_are_rejected() -> None:
     with pytest.raises(ValueError, match="wasted prefill"):
         outcome("r", 0, p_work=1, wasted_p=2)

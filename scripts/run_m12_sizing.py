@@ -38,7 +38,7 @@ from scripts.run_m12_placement import (  # noqa: E402
     build_trace_workload,
 )
 
-SCHEMA_VERSION = "m12-sizing-v1"
+SCHEMA_VERSION = "m12-sizing-v2"
 DEFAULT_P_COUNTS = tuple(range(1, 9))
 DEFAULT_TOPOLOGIES = tuple(SizingTopology)
 BASELINE_GATES = SizingGates(1.0, 0.80, 0.90, 20_000.0, 1_000_000.0)
@@ -158,6 +158,7 @@ def build_artifacts(
         "cache_capacity_mode": "NO_EVICTION_CAPACITY_CONTROL_PER_P_NODE",
         "decode_node_count": 8,
         "service_regime": SERVICE_REGIMES[2].regime_id.value,
+        "service_costs": asdict(SERVICE_REGIMES[2]),
         "timestamp_mapping": "raw trace timestamp_ms, no replay slowdown",
         "observation_end_work": SIZING_OBSERVATION_END_WORK,
         "tier_slo_work": TIER_SLO_WORK,

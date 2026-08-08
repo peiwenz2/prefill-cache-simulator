@@ -38,7 +38,7 @@ class LeaseConfig:
     max_quantum: int = 64
     base_quantum: int = 14
     decode_token_work: float = 1.0
-    prefill_token_work: float = 0.0568
+    prefill_token_work: float = 0.06
     max_recovery_work: float = 1e9
     local_capacity_blocks: int = 256
     remote_capacity_blocks: int = 4096

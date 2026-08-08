@@ -20,7 +20,7 @@ class M5Case:
     fixed_latency_ms: float = 0.2
     overlap_ratio: float = 0.5
     bytes_per_token: int = 65_536
-    prefill_token_ms: float = 0.0568
+    prefill_token_ms: float = 0.06
     kvcache_balancing_threshold: float = 2.0
     lookup_timeout_probability: float = 0
     seed: int = 713

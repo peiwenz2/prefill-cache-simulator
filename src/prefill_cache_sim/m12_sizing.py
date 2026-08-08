@@ -398,7 +398,7 @@ def _sizing_cost(
     kvs_work = (
         0.0
         if topology is SizingTopology.ZERO_TRANSFER_PRICE_CONTROL
-        else regime.kvs_byte_work * kvs_bytes_per_token * cost_scale
+        else regime.kvs_token_work * cost_scale
     )
     return FrozenKernelCostModel(
         regime.prefill_token_work * cost_scale,

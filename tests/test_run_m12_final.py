@@ -180,6 +180,13 @@ def test_artifacts_are_atomic_deterministic_and_load_workload_once(
     constraints_header = (left / "constraints.csv").read_text().splitlines()[0]
     assert "queue_p95_normalized_work" in constraints_header
     assert "p99" not in constraints_header
+    contract = json.loads((left / "contract.json").read_text())
+    assert contract["schema_version"] == "m12-final-contract-v2"
+    mixed = next(item for item in contract["regimes"] if item["regime_id"] == "MIXED")
+    assert mixed["prefill_token_work"] == 0.06
+    assert mixed["decode_token_work"] == 1.0
+    assert mixed["kvs_token_work"] == 0.01
+    assert mixed["kvs_bytes_per_token"] == 65_536
     provenance = json.loads((left / "provenance.json").read_text())
     assert set(provenance["imported_script_sha256"]) == {
         "scripts/run_m12_final.py",

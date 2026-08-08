@@ -42,7 +42,7 @@ def base_case(case_id: str, selector: str) -> ExperimentCase:
         view_loss_probability=0,
         replay_speed=1,
         seed=713,
-        prefill_uncached_token_ms=0.0568,
+        prefill_uncached_token_ms=0.06,
         prefill_concurrency_per_node=1,
         prefix_anchor_k=2,
         soft_alpha=1.25,

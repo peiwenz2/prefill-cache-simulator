@@ -24,7 +24,8 @@ class SyntheticServiceRegime:
     prefill_batch_saturation_tokens: int
     decode_batch_max_saving: float
     decode_batch_saturation_sequences: int
-    kvs_byte_work: float
+    kvs_token_work: float
+    kvs_bytes_per_token: int = 65_536
 
     def __post_init__(self) -> None:
         positive = (
@@ -32,7 +33,8 @@ class SyntheticServiceRegime:
             self.decode_token_work,
             self.prefill_batch_saturation_tokens,
             self.decode_batch_saturation_sequences,
-            self.kvs_byte_work,
+            self.kvs_token_work,
+            self.kvs_bytes_per_token,
         )
         if any(value <= 0 for value in positive):
             raise ValueError("service-regime costs and saturations must be positive")
@@ -66,7 +68,8 @@ class SyntheticServiceRegime:
     def kvs_work(self, transferred_bytes: int) -> float:
         if transferred_bytes < 0:
             raise ValueError("transferred bytes must be non-negative")
-        return transferred_bytes * self.kvs_byte_work
+        transferred_tokens = transferred_bytes / self.kvs_bytes_per_token
+        return transferred_tokens * self.kvs_token_work
 
 
 SERVICE_REGIMES: tuple[SyntheticServiceRegime, ...] = (
@@ -78,7 +81,7 @@ SERVICE_REGIMES: tuple[SyntheticServiceRegime, ...] = (
         prefill_batch_saturation_tokens=65_536,
         decode_batch_max_saving=0.20,
         decode_batch_saturation_sequences=64,
-        kvs_byte_work=1.0e-7,
+        kvs_token_work=0.01,
     ),
     SyntheticServiceRegime(
         ServiceRegimeId.MEMORY_BOUND,
@@ -88,17 +91,17 @@ SERVICE_REGIMES: tuple[SyntheticServiceRegime, ...] = (
         prefill_batch_saturation_tokens=32_768,
         decode_batch_max_saving=0.35,
         decode_batch_saturation_sequences=32,
-        kvs_byte_work=2.5e-7,
+        kvs_token_work=0.02,
     ),
     SyntheticServiceRegime(
         ServiceRegimeId.MIXED,
-        prefill_token_work=0.0568,
+        prefill_token_work=0.06,
         decode_token_work=1.0000,
         prefill_batch_max_saving=0.30,
         prefill_batch_saturation_tokens=49_152,
         decode_batch_max_saving=0.25,
         decode_batch_saturation_sequences=48,
-        kvs_byte_work=1.5e-7,
+        kvs_token_work=0.01,
     ),
 )
 
@@ -403,7 +406,7 @@ def aggregate_m12_metrics(
     if p_over or d_over:
         raise ValueError("issued GPU work exceeds normalized pool capacity")
     return M12MetricReport(
-        schema_version="m12-metric-contract-v1.1",
+        schema_version="m12-metric-contract-v1.2",
         truth_basis="SYNTHETIC_SERVICE_REGIME",
         observation_start_work=observation_start_work,
         observation_end_work=observation_end_work,

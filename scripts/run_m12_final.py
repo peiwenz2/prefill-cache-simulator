@@ -952,8 +952,8 @@ def execute_cell(
     )
     cost = FrozenKernelCostModel(
         regime.prefill_token_work,
-        regime.kvs_byte_work,
-        1,
+        regime.kvs_token_work,
+        regime.kvs_bytes_per_token,
         regime.decode_token_work,
     )
     truth = scaled.request_truth if isinstance(scaled, PlacementWorkload) else {}
@@ -1197,11 +1197,11 @@ def _build_artifacts(
         "gates/g12-4.json": _json_bytes(_g12_4(results, binding_cells)),
         "contract.json": _json_bytes(
             {
-                "schema_version": "m12-final-contract-v1",
+                "schema_version": "m12-final-contract-v2",
                 "truth_basis": TRUTH_BASIS,
                 "fixed_horizon": OBSERVATION_END_WORK,
                 "arrival_scales": ARRIVAL_SCALES,
-                "regimes": [item.regime_id.value for item in SERVICE_REGIMES],
+                "regimes": [asdict(item) for item in SERVICE_REGIMES],
                 "primary_metric": "strict_useful_token_goodput",
                 "oracle_deployable": False,
             }

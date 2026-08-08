@@ -125,6 +125,12 @@ def test_artifacts_are_deterministic_and_exclude_zero_price_control_from_winner(
     provenance = json.loads(first["provenance.json"])
     assert provenance["record_count"] == 23_608
     assert provenance["sizing_cell_count"] == len(records)
+    contract = json.loads(first["contract.json"])
+    assert contract["schema_version"] == "m12-sizing-v2"
+    assert contract["service_costs"]["prefill_token_work"] == 0.06
+    assert contract["service_costs"]["decode_token_work"] == 1.0
+    assert contract["service_costs"]["kvs_token_work"] == 0.01
+    assert contract["service_costs"]["kvs_bytes_per_token"] == 65_536
     frontier_text = first["threshold-frontier.csv"].decode()
     frontier = list(csv.DictReader(io.StringIO(frontier_text)))
     assert len(frontier) == 29 * 3

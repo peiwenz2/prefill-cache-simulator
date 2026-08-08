@@ -274,7 +274,7 @@ def test_store_and_probe_costs_change_outcomes() -> None:
 
 def test_prefill_work_conserves_for_every_protocol() -> None:
     requests = tuple(request(str(i), output_tokens=64) for i in range(6))
-    prefill = 512 * 0.0568
+    prefill = 512 * 0.06
     for protocol in ProtocolId:
         report = simulate_lifecycle(
             requests,

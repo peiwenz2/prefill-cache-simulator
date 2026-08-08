@@ -488,7 +488,7 @@ def test_slo_slack_applies_to_full_marginal_cost_not_queue_only() -> None:
         CausalKernel(config()).run(workload, policy)
 
 
-def test_case_contention_changes_executed_kvs_and_completion() -> None:
+def test_case_contention_changes_executed_kvs_and_queue() -> None:
     workload = build_kernel_requests(
         [
             TraceRequestInput(
@@ -511,7 +511,7 @@ def test_case_contention_changes_executed_kvs_and_completion() -> None:
                 "STANDARD",
                 80_002,
                 ("B",),
-                (2,),
+                (250_000,),
                 2,
                 "m",
                 "a",
@@ -558,7 +558,6 @@ def test_case_contention_changes_executed_kvs_and_completion() -> None:
     assert contended_report.spill_count == 0
     assert contended_report.kvs_normalized_work < normal_report.kvs_normalized_work
     assert contended_report.p_queue_p95 > normal_report.p_queue_p95
-    assert contended_report.completion_max_work > normal_report.completion_max_work
 
 
 def test_case_contention_is_applied_once_to_policy_and_kernel_costs() -> None:

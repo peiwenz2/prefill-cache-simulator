@@ -40,7 +40,7 @@ class LifecycleConfig:
     protocol: ProtocolId
     prefill_nodes: int
     decode_nodes: int
-    prefill_token_cost: float = 0.0568
+    prefill_token_cost: float = 0.06
     decode_token_cost: float = 1.0
     max_post_prefill_wait: float = 64.0
     probe_cost: float = 2.0

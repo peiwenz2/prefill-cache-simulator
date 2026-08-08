@@ -46,7 +46,7 @@ def main() -> int:
                         break
                     remaining = request.output_tokens - emitted
                     recovery = (
-                        request.input_tokens * 0.0568
+                        request.input_tokens * 0.06
                         if recovery_mode == "R1_PREFIX_KVS"
                         else request.input_tokens * 0.002
                     )
@@ -113,7 +113,7 @@ def main() -> int:
                     "max_preemptions": config.max_preemptions,
                     "hard_gate_limit": config.max_preemptions_per_completed,
                     "completion_model": "ASSUME_RESUME_SUCCESS_UPPER_BOUND",
-                    "r1_recovery_per_input_token": 0.0568,
+                    "r1_recovery_per_input_token": 0.06,
                     "r2_recovery_per_input_token": 0.002,
                     "calibration_status": "SYNTHETIC_UNCALIBRATED",
                     "trace_sha256": loaded.sha256,
