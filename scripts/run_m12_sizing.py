@@ -41,7 +41,7 @@ from scripts.run_m12_placement import (  # noqa: E402
     build_trace_workload,
 )
 
-SCHEMA_VERSION = "m12-sizing-v2.2"
+SCHEMA_VERSION = "m12-sizing-v2.3"
 DEFAULT_P_COUNTS = tuple(range(1, 9))
 DEFAULT_TOPOLOGIES = tuple(SizingTopology)
 BASELINE_GATES = SizingGates(1.0, 0.80, 0.90, 20_000.0, 1_000_000.0)
@@ -170,7 +170,10 @@ def _run_grid_cell(
 
 
 def _run_grid_cell_wire(value: tuple[SizingTopology, int, int]) -> dict[str, object]:
-    record = _run_grid_cell(value)
+    return _record_to_wire(_run_grid_cell(value))
+
+
+def _record_to_wire(record: SizingRunRecord) -> dict[str, object]:
     observation = record.cell.observation
     return {
         "topology": record.cell.topology.value,
@@ -206,6 +209,7 @@ def _run_grid_cell_wire(value: tuple[SizingTopology, int, int]) -> dict[str, obj
             tier: tuple(values)
             for tier, values in record.per_tier_completion_elapsed_work.items()
         },
+        "completion_ledger": record.completion_ledger,
         "decision_fingerprint": record.decision_fingerprint,
     }
 
@@ -223,6 +227,7 @@ def _record_from_wire(value: Mapping[str, object]) -> SizingRunRecord:
         *value["scalars"],
         value["per_tier_slo_attainment"],
         value["per_tier_completion_elapsed_work"],
+        tuple(value["completion_ledger"]),
         str(value["decision_fingerprint"]),
     )
 
@@ -276,8 +281,9 @@ def build_artifacts(
             "resident cache keys at observation end; mean/min/max across P nodes"
         ),
         "deadline_frontier_semantics": (
-            "evaluator-only: scale tier deadlines post-hoc while routing, execution, "
-            "costs, queue gates, and KVS gates remain frozen"
+            "evaluator-only: scale tier deadlines post-hoc and recompute per-tier "
+            "attainment plus Jain fairness while routing, execution, costs, queue "
+            "gates, and KVS gates remain frozen"
         ),
     }
     summary = {
@@ -367,9 +373,20 @@ def _deadline_frontier_rows(
                 )
                 for tier, samples in record.per_tier_completion_elapsed_work.items()
             }
+            tenant_demand: dict[str, int] = {}
+            tenant_service: dict[str, int] = {}
+            for tenant, _tier, demand, elapsed in record.completion_ledger:
+                tenant_demand[tenant] = tenant_demand.get(tenant, 0) + demand
+                if elapsed <= TIER_SLO_WORK[_tier] * multiplier:
+                    tenant_service[tenant] = tenant_service.get(tenant, 0) + demand
+            ratios = tuple(
+                tenant_service.get(tenant, 0) / demand
+                for tenant, demand in sorted(tenant_demand.items())
+            )
             observation = replace(
                 record.cell.observation,
                 minimum_tier_slo_attainment=min(per_tier.values()),
+                jain_fairness=_jain(ratios),
             )
             scaled_cells.append(
                 replace(
@@ -401,6 +418,14 @@ def _deadline_frontier_rows(
                 }
             )
     return rows
+
+
+def _jain(values: Sequence[float]) -> float:
+    if not values:
+        return 0.0
+    numerator = sum(values) ** 2
+    denominator = len(values) * sum(value * value for value in values)
+    return numerator / denominator if denominator else 0.0
 
 
 def publish(output_dir: Path, artifacts: Mapping[str, bytes]) -> None:

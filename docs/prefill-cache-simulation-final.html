@@ -4,7 +4,7 @@
 <style>
 :root{--ink:#172033;--muted:#64748b;--line:#d9deea;--paper:#fff;--wash:#f5f6fb;--accent:#4338ca;--soft:#eef2ff;--ok:#15803d;--oksoft:#edf8f0;--warn:#b45309;--warnsoft:#fff7ed;--bad:#b91c1c;--badsoft:#fef2f2}
 *{box-sizing:border-box}body{margin:0;background:#e9ecf3;color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}main{width:1120px;margin:24px auto;background:var(--paper);box-shadow:0 14px 40px #1720331a}section{padding:46px 56px;border-bottom:1px solid var(--line);break-inside:avoid}h1{font-size:38px;line-height:1.2;margin:8px 0 18px}h2{font-size:27px;margin:0 0 20px}h3{font-size:19px;margin:24px 0 10px}.eyebrow,.label{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}.lede{font-size:20px;line-height:1.65}.grid2,.grid3,.grid4{display:grid;gap:14px}.grid2{grid-template-columns:repeat(2,1fr)}.grid3{grid-template-columns:repeat(3,1fr)}.grid4{grid-template-columns:repeat(4,1fr)}.card,.call{border:1px solid var(--line);border-radius:14px;padding:17px;background:#fff}.call{border-left:5px solid var(--accent);background:var(--soft)}.ok{border-left-color:var(--ok);background:var(--oksoft)}.warn{border-left-color:var(--warn);background:var(--warnsoft)}.bad{border-left-color:var(--bad);background:var(--badsoft)}.metric{font-size:28px;font-weight:800;color:var(--accent);margin:4px 0}.metric.green{color:var(--ok)}table{width:100%;border-collapse:collapse;margin:12px 0 18px}th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}th{background:var(--wash)}code,pre{font-family:"SFMono-Regular",Consolas,monospace}code{background:#f2f4f9;border-radius:5px;padding:2px 5px}pre{white-space:pre-wrap;background:#f2f4f9;color:#263147;border:1px solid var(--line);border-radius:12px;padding:15px;line-height:1.65}ul,ol{margin:7px 0;padding-left:21px}li+li{margin-top:4px}.fine{font-size:12px;color:var(--muted)}
-@page{size:A4 landscape;margin:9mm}@media print{body{background:#fff;font-size:10px}main{width:auto;margin:0;box-shadow:none}section{padding:8mm 10mm;min-height:190mm;page-break-after:always}h1{font-size:28px}h2{font-size:21px}h3{font-size:15px}.lede{font-size:14px}.metric{font-size:20px}table{font-size:9px}.fine{font-size:8px}}
+@page{size:A4 landscape;margin:7mm}@media print{body{background:#fff;font-size:8.8px;line-height:1.42}main{width:auto;margin:0;box-shadow:none}section{padding:6mm 8mm;min-height:190mm;page-break-after:always}h1{font-size:27px}h2{font-size:20px;margin-bottom:14px}h3{font-size:14px;margin:15px 0 7px}.lede{font-size:13px}.metric{font-size:19px}.card,.call{padding:11px}.grid2,.grid3,.grid4{gap:9px}table{font-size:8px;margin:8px 0 12px}th,td{padding:6px 8px}pre{padding:10px;line-height:1.45}.fine{font-size:7.5px}}
 </style></head><body><main>
 <section>
 <div class="eyebrow">Final report · 2026-08-09</div>
@@ -105,8 +105,8 @@ KV_bytes        = remote_hit_tokens × 65,536</pre>
 </section>
 
 <section>
-<div class="eyebrow">06 · Full v2.2 result</div><h2>Deadline 松紧、queue、utilization 和 alive blocks</h2>
-<div class="call"><div class="label">Deadline sensitivity 的准确语义</div>只把三个 tier deadline 同比乘 0.5×～2.0×，routing、执行顺序、service cost、queue gate 和 KVS gate 全部冻结。它回答“同一批执行结果换一条 deadline 线会怎样”，不是 policy-aware reroute。</div>
+<div class="eyebrow">06 · Full v2.3 result</div><h2>Deadline 松紧、queue、utilization 和 alive blocks</h2>
+<div class="call"><div class="label">Deadline sensitivity 的准确语义</div>只把三个 tier deadline 同比乘 0.5×～2.0×，并重新计算 per-tier attainment 与 Jain fairness；routing、执行顺序、service cost、queue gate 和 KVS gate 全部冻结。它回答“同一批执行结果换一条 deadline 线会怎样”，不是 policy-aware reroute。</div>
 <table><thead><tr><th>Deadline</th><th>Local N*</th><th>Shared N*</th><th>结论</th></tr></thead><tbody>
 <tr><td>0.50×</td><td>≤8 无解</td><td>≤8 无解</td><td>deadline 砍半后，最差 tier gate 无法通过；禁止外推。</td></tr>
 <tr><td>0.75×</td><td>3</td><td>3</td><td>两者都需要 3 P；Shared 不省资源。</td></tr>

@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -56,6 +57,12 @@ def record(
             "STANDARD": (10.0,),
             "RELAXED": (10.0,),
         },
+        (
+            ("tenant-a", "STRICT", 10, 10.0),
+            ("tenant-b", "STRICT", 10, 20.0),
+            ("tenant-a", "STANDARD", 10, 10.0),
+            ("tenant-b", "RELAXED", 10, 10.0),
+        ),
         hashlib.sha256(f"{topology}-{p_count}".encode()).hexdigest(),
     )
 
@@ -96,6 +103,7 @@ def test_record_rejects_tier_maps_that_serializer_cannot_publish(
             0.2,
             tiers,
             {tier: (10.0,) for tier in tiers},
+            tuple(("tenant", tier, 10, 10.0) for tier in tiers),
             "f" * 64,
         )
     with pytest.raises(ValueError, match="requires exactly STRICT"):
@@ -117,6 +125,41 @@ def test_plan_is_complete_canonical_and_rejects_invalid_counts() -> None:
     )
     with pytest.raises(ValueError):
         build_plan((True, 2))
+
+
+def test_worker_wire_round_trip_preserves_record() -> None:
+    original = record(SizingTopology.LOCAL_ONLY, 2, completion=1)
+    assert sizing_runner._record_from_wire(
+        sizing_runner._record_to_wire(original)
+    ) == original
+
+
+def test_deadline_frontier_recomputes_fairness_from_logical_ledger() -> None:
+    original = record(SizingTopology.LOCAL_ONLY, 1, completion=1)
+    strict_elapsed = (1000.0,) * 8 + (3000.0,) * 2
+    ledger = tuple(
+        [("tenant-a", "STRICT", 10, 1000.0)] * 8
+        + [("tenant-b", "STRICT", 10, 3000.0)] * 2
+        + [("tenant-a", "STANDARD", 10, 1000.0)]
+        + [("tenant-b", "RELAXED", 10, 1000.0)]
+    )
+    changed = replace(
+        original,
+        per_tier_completion_elapsed_work={
+            "STRICT": strict_elapsed,
+            "STANDARD": (1000.0,),
+            "RELAXED": (1000.0,),
+        },
+        completion_ledger=ledger,
+    )
+    rows = sizing_runner._deadline_frontier_rows((changed,))
+    local_half = next(
+        row
+        for row in rows
+        if row["deadline_multiplier"] == 0.5
+        and row["topology"] == SizingTopology.LOCAL_ONLY.value
+    )
+    assert local_half["minimum_feasible_p"] == "GRID_EXHAUSTED"
 
 
 def test_artifacts_are_deterministic_and_exclude_zero_price_control_from_winner(
@@ -181,7 +224,7 @@ def test_artifacts_are_deterministic_and_exclude_zero_price_control_from_winner(
     assert provenance["record_count"] == 23_608
     assert provenance["sizing_cell_count"] == len(records)
     contract = json.loads(first["contract.json"])
-    assert contract["schema_version"] == "m12-sizing-v2.2"
+    assert contract["schema_version"] == "m12-sizing-v2.3"
     assert contract["service_costs"]["prefill_token_work"] == 0.06
     assert contract["service_costs"]["decode_token_work"] == 1.0
     assert contract["service_costs"]["kvs_token_work"] == 0.01

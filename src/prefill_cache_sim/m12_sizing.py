@@ -142,6 +142,7 @@ class SizingRunRecord:
     normalized_kvs_work: float
     per_tier_slo_attainment: Mapping[str, float]
     per_tier_completion_elapsed_work: Mapping[str, tuple[float, ...]]
+    completion_ledger: tuple[tuple[str, str, int, float], ...]
     decision_fingerprint: str
 
     def __post_init__(self) -> None:
@@ -177,6 +178,11 @@ class SizingRunRecord:
         object.__setattr__(
             self, "per_tier_completion_elapsed_work", MappingProxyType(elapsed)
         )
+        if any(
+            not tenant or not tier or demand <= 0 or elapsed_work < 0
+            for tenant, tier, demand, elapsed_work in self.completion_ledger
+        ):
+            raise ValueError("completion ledger entries must be valid")
 
 
 def run_sizing_cell(
@@ -232,6 +238,9 @@ def run_sizing_cell(
     elapsed_by_tier: dict[str, list[float]] = {
         tier: [] for tier in tier_slo_work
     }
+    completion_by_id = {
+        request.logical.logical_request_id: math.inf for request in resized
+    }
     for attempt in result.attempts:
         request = requests_by_id[attempt.logical_request_id]
         if attempt.prefill_start_work is not None:
@@ -243,6 +252,11 @@ def run_sizing_cell(
             if attempt.finish_work is None
             else max(0.0, attempt.finish_work - request.logical.arrival_work)
         )
+        if attempt.finish_work is not None:
+            completion_by_id[attempt.logical_request_id] = min(
+                completion_by_id[attempt.logical_request_id],
+                max(0.0, attempt.finish_work - request.logical.arrival_work),
+            )
     queue_waits.sort()
     block_counts = tuple(len(result.cache_by_node[node]) for node in p_nodes)
     completed = {
@@ -288,6 +302,17 @@ def run_sizing_cell(
         result.metrics.kvs_normalized_work,
         result.metrics.per_tier_slo_attainment,
         {tier: tuple(values) for tier, values in elapsed_by_tier.items()},
+        tuple(
+            (
+                request.logical.tenant_id,
+                request.logical.tier,
+                request.logical.input_tokens + request.logical.true_output_tokens,
+                completion_by_id[request.logical.logical_request_id],
+            )
+            for request in sorted(
+                resized, key=lambda value: value.logical.logical_request_id
+            )
+        ),
         _decision_fingerprint(policy),
     )
 
