@@ -214,6 +214,22 @@ class CausalView:
         object.__setattr__(view, "retry_budget_remaining", 0)
         return view
 
+    def _with_retry_budget(self, remaining: int) -> CausalView:
+        """Clone lease state while sharing the immutable snapshot objects."""
+        if not _is_plain_int(remaining) or remaining < 0:
+            raise ValueError("retry budget remaining must be a non-negative integer")
+        view = object.__new__(type(self))
+        object.__setattr__(view, "now_work", self.now_work)
+        object.__setattr__(
+            view, "completed_cache_keys", self.completed_cache_keys
+        )
+        object.__setattr__(view, "prefill_available_at", self.prefill_available_at)
+        object.__setattr__(view, "decode_available_at", self.decode_available_at)
+        object.__setattr__(view, "cache_by_node", self.cache_by_node)
+        object.__setattr__(view, "queued_prefill_work", self.queued_prefill_work)
+        object.__setattr__(view, "retry_budget_remaining", remaining)
+        return view
+
 
 class _CompletedCacheKeysView(AbstractSet[str]):
     """Immutable lazy union over one frozen per-node cache snapshot."""
@@ -681,11 +697,8 @@ class CausalKernel:
                     serial += 1
                     continue
                 event_log.append(KernelEvent(at, kind, decode_key[0], decode_key[1]))
-                lease_view = replace(
-                    live_view,
-                    retry_budget_remaining=max(
-                        0, self.config.retry_budget - item.spec.attempt_index
-                    ),
+                lease_view = live_view._with_retry_budget(
+                    max(0, self.config.retry_budget - item.spec.attempt_index)
                 )
                 finish = (
                     at
@@ -724,13 +737,10 @@ class CausalKernel:
                 assert isinstance(lease_key, tuple)
                 item = pending[lease_key]
                 event_log.append(KernelEvent(at, kind, lease_key[0], lease_key[1]))
-                lease_view = replace(
-                    self._view(
-                        at, cache_snapshots, p_available, d_available, queued_work
-                    ),
-                    retry_budget_remaining=max(
-                        0, self.config.retry_budget - item.spec.attempt_index
-                    ),
+                lease_view = self._view(
+                    at, cache_snapshots, p_available, d_available, queued_work
+                )._with_retry_budget(
+                    max(0, self.config.retry_budget - item.spec.attempt_index)
                 )
                 revised = policy.reprice_decode(item.request, item.spec, lease_view)
                 if revised.terminal is AttemptTerminal.ABORTED:

@@ -20,6 +20,29 @@ from prefill_cache_sim.m12_kernel import (
 from prefill_cache_sim.m12_metrics import LogicalRequestSpec
 
 
+def test_retry_budget_view_clone_preserves_lazy_cache_union() -> None:
+    class CountingSet(set[str]):
+        iterations = 0
+
+        def __iter__(self):
+            self.iterations += 1
+            return super().__iter__()
+
+    completed = CountingSet({"A", "B"})
+    view = CausalView._from_kernel(
+        1,
+        completed,
+        {"p0": 1},
+        {"d0": 1},
+        {"p0": frozenset({"A"})},
+        {"p0": 0},
+    )
+    cloned = view._with_retry_budget(2)
+    assert cloned.completed_cache_keys is completed
+    assert cloned.retry_budget_remaining == 2
+    assert completed.iterations == 0
+
+
 def request(
     identity: str,
     *,
