@@ -361,24 +361,20 @@ def _deadline_frontier_rows(
     for multiplier in DEADLINE_MULTIPLIERS:
         scaled_cells: list[SizingCell] = []
         for record in records:
-            per_tier = {
-                tier: (
-                    sum(
-                        elapsed <= TIER_SLO_WORK[tier] * multiplier
-                        for elapsed in samples
-                    )
-                    / len(samples)
-                    if samples
-                    else 0.0
-                )
-                for tier, samples in record.per_tier_completion_elapsed_work.items()
-            }
             tenant_demand: dict[str, int] = {}
             tenant_service: dict[str, int] = {}
-            for tenant, _tier, demand, elapsed in record.completion_ledger:
+            tier_demand: dict[str, int] = {}
+            tier_service: dict[str, int] = {}
+            for tenant, tier, demand, elapsed in record.completion_ledger:
                 tenant_demand[tenant] = tenant_demand.get(tenant, 0) + demand
-                if elapsed <= TIER_SLO_WORK[_tier] * multiplier:
+                tier_demand[tier] = tier_demand.get(tier, 0) + 1
+                if elapsed <= TIER_SLO_WORK[tier] * multiplier:
                     tenant_service[tenant] = tenant_service.get(tenant, 0) + demand
+                    tier_service[tier] = tier_service.get(tier, 0) + 1
+            per_tier = {
+                tier: tier_service.get(tier, 0) / count
+                for tier, count in sorted(tier_demand.items())
+            }
             ratios = tuple(
                 tenant_service.get(tenant, 0) / demand
                 for tenant, demand in sorted(tenant_demand.items())

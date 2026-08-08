@@ -202,7 +202,7 @@ def run_sizing_cell(
     """Execute one sizing point through the causal kernel.
 
     Cache capacity is per P node.  The initial full-trace contract intentionally
-    sets it above the unique-key count, so this measures resource sizing without
+    sets it equal to the global unique-key count, so this measures sizing without
     conflating an unimplemented sizing-specific eviction policy.
     """
     if not _plain_positive_int(p_count):

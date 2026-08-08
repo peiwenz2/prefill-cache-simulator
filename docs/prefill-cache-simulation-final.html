@@ -76,9 +76,9 @@ KV_bytes        = remote_hit_tokens × 65,536</pre>
 <table><thead><tr><th>阶段</th><th>输入</th><th>kernel 动作</th><th>证据</th></tr></thead><tbody>
 <tr><td>Arrival</td><td>timestamp、tokens、hash_ids</td><td>按时间发出 23,608 logical requests；same-time priority 固定。</td><td>offered/completed ledger。</td></tr>
 <tr><td>Placement</td><td>causal cache snapshot、P queue、KVS price</td><td>selector 返回唯一 P/D；不能读取未来。</td><td>decision fingerprint、local/remote/miss tokens。</td></tr>
-<tr><td>Prefill</td><td>miss＋remote tokens</td><td>P 串行执行 recompute 与 modeled transfer，记录 READY/START/FINISH。</td><td>actual queue wait、P modeled utilization。</td></tr>
+<tr><td>Prefill</td><td>miss＋remote tokens</td><td>P timeline 串行放入 recompute 与 modeled transfer，记录 READY/START/FINISH。</td><td>actual queue wait；P utilization 只计 recompute issued work。</td></tr>
 <tr><td>Decode</td><td>true output tokens</td><td>D pool 执行 output work；resource sizing 不启用 abort/retry。</td><td>D modeled utilization、completion。</td></tr>
-<tr><td>Cache</td><td>完成 request 的 prefix keys</td><td>本实验 capacity 大于 unique keys：admit all、no eviction。</td><td>结束时每个 P 的 alive blocks。</td></tr>
+<tr><td>Cache</td><td>完成 request 的 prefix keys</td><td>每 P capacity 等于全 trace 183,166 个 unique keys：admit all、no eviction。</td><td>结束时每个 P 的 alive blocks。</td></tr>
 <tr><td>Gate</td><td>deadline、fairness、queue、KVS budget</td><td>全部门槛通过才认为该 P 数可行。</td><td>minimum feasible P 与 P−1 失败证据。</td></tr>
 </tbody></table>
 <div class="grid2">
@@ -95,10 +95,10 @@ KV_bytes        = remote_hit_tokens × 65,536</pre>
 <tr><td>Minimum-tier attainment</td><td>≥80%</td><td>≥95%</td><td>三个 tier 分别算按时率，取最差的一个。</td></tr>
 <tr><td>Jain fairness</td><td>≥0.90</td><td>≥0.90</td><td>不同 synthetic tenant 的服务不能差太远。</td></tr>
 <tr><td>P queue p95</td><td>≤20,000 work</td><td>≤20,000 work</td><td>这是 backlog gate，不是 ms。</td></tr>
-<tr><td>KVS bytes/work</td><td>≤1,000,000</td><td>≤1,000,000</td><td>这是 modeled transfer budget，不是真实链路 GB/s。</td></tr>
+<tr><td>KVS bytes/work</td><td>≤1,000,000</td><td>≤1,000,000</td><td>总 modeled bytes ÷ 6,000,000 observation-window work；不是真实 GB/s。</td></tr>
 </tbody></table>
 <table><thead><tr><th>门槛</th><th>Local-only N*</th><th>Shared KVS N*</th><th>P−1 为什么失败</th></tr></thead><tbody>
-<tr><td>最差 tier ≥80%</td><td><strong>3</strong></td><td><strong>2</strong></td><td>Local P2：STRICT 3,701/4,780＝77.43%＜80%；Shared P2＝3,866/4,780＝80.88%。</td></tr>
+<tr><td>最差 tier ≥80%</td><td><strong>3</strong></td><td><strong>2</strong></td><td>Local P2：STRICT 3,701/4,780＝77.43%＜80%；Shared P2＝3,866/4,780＝80.88%。4,780 是 synthetic tier assignment 下的 STRICT request 数。</td></tr>
 <tr><td>最差 tier ≥95%</td><td><strong>4</strong></td><td><strong>4</strong></td><td>P3：Local 4,504/4,780＝94.23%；Shared 4,485/4,780＝93.83%，都未过 95%。</td></tr>
 </tbody></table>
 <div class="call ok"><div class="label">可量化结论</div>在 baseline 80% gate 下，Shared KVS 把最小 P 从 3 台降到 2 台，减少 1/3；gate 收紧到 95% 后，两种 topology 都要 4 台，省节点收益消失。</div>
@@ -122,7 +122,7 @@ KV_bytes        = remote_hit_tokens × 65,536</pre>
 <tr><td>Local P4</td><td>54.56%</td><td>1,484.04 work-time</td><td>P 23.04%／D 8.96%</td><td>mean 48,283.5；46,832～50,031</td></tr>
 <tr><td>Shared P4</td><td>56.83%</td><td>1,422.84 work-time</td><td>P 21.89%／D 8.96%</td><td>mean 52,726.0；51,774～54,120</td></tr>
 </tbody></table>
-<div class="grid2"><div class="call ok"><div class="label">P=2 的量化收益</div><ul><li>Token hit ＋2.18pp。</li><li>Actual queue wait p95 下降 768.26 work-time，－10.70%。</li><li>P modeled utilization 46.02%→43.80%，说明 remote fetch 替换了部分 recompute。</li><li>STRICT on-time requests 多 165 条，刚好跨过 80% gate。</li></ul></div><div class="call warn"><div class="label">为什么 alive blocks/P 反而更多</div><ul><li>Shared P2 的 mean final alive blocks 比 Local 多 4,545，＋4.71%。</li><li>原因是每个 P 在 request 完成后仍 admit 全部 prefix；不同路由会产生副本。</li><li>本 sizing 是 no eviction，因此这是“结束时 resident keys”，不是显存容量需求。</li><li>真实 TTL/LRU 会改变这条曲线，不能直接换算 GPU memory。</li></ul></div></div>
+<div class="grid2"><div class="call ok"><div class="label">P=2 的量化收益</div><ul><li>Token hit ＋2.18pp：local hit 少 4,676,520 tokens，remote 增 9,105,525，净增 4,429,005。</li><li>Actual queue wait p95 下降 768.26 work-time，－10.70%。</li><li>P recompute utilization 46.02%→43.80%；transfer 另占 P timeline 约 0.76pp，合计 occupancy 约 44.56%。</li><li>STRICT on-time requests 多 165 条，刚好跨过 80% gate。</li></ul></div><div class="call warn"><div class="label">为什么 alive blocks/P 反而更多</div><ul><li>Shared P2 的 mean final alive blocks 比 Local 多 4,545，＋4.71%。</li><li>原因是每个 P 在 request 完成后仍 admit 全部 prefix；不同路由会产生副本。</li><li>本 sizing 是 no eviction，因此这是“结束时 resident keys”，不是显存容量需求。</li><li>真实 TTL/LRU 会改变这条曲线，不能直接换算 GPU memory。</li></ul></div></div>
 </section>
 
 <section>
@@ -131,7 +131,7 @@ KV_bytes        = remote_hit_tokens × 65,536</pre>
 <div class="card"><div class="label">可以落地</div><ul><li>Local-only：stable prefix owner＋bounded load fallback。</li><li>Shared：priced spill，remote 只有比 recompute/queue 更便宜时才取。</li><li>Autoscaling：按最差 tier attainment＋queue＋fairness 选最小 P。</li><li>Shadow 指标：local/remote/miss、snapshot age、actual wait、transfer bytes。</li></ul></div>
 <div class="card"><div class="label">仍需硬件验证</div><ul><li>work-time 到 ms 的标定。</li><li>KV bytes/token 与具体模型、dtype、TP 的关系。</li><li>真实 KVS bandwidth/contention。</li><li>真实 GPU MFU；当前只有 modeled issued-work utilization。</li><li>capacity/TTL/eviction 下的 alive block 曲线。</li></ul></div>
 </div>
-<div class="call ok"><div class="label">最大价值</div><ul><li>Local-only 54.01% 已接近 57.07% trace ceiling，继续追 hit 的空间有限且容易制造 hotspot。</li><li>Shared KVS 把 cache reuse 变成可定价的资源替代：少算多少 Prefill、搬多少 KV、少用几台 P、最差 tier 是否仍按时。</li><li>Shared 不是无条件 winner：旧 floor sensitivity 在 0.94 和 0.96 出现反转，说明 transfer/routing 也会伤害严格 SLO。</li></ul></div>
+<div class="call ok"><div class="label">最大价值</div><ul><li>Local-only 54.01% 已接近 57.07% trace ceiling，继续追 hit 的空间有限且容易制造 hotspot。</li><li>Shared KVS 把 cache reuse 变成可定价的资源替代：少算多少 Prefill、搬多少 KV、少用几台 P、最差 tier 是否仍按时。</li><li>Shared 不是无条件 winner：<code>threshold-frontier.csv</code> 在 floor 0.94 和 0.96 出现反转。</li><li>contract 中 batching saving 参数被冻结但本 sizing kernel 未使用；P/D utilization 没有 batch discount。</li></ul></div>
 <div class="call warn"><div class="label">Decode lease</div>它应作为 overload protection 单独验证。已有 sensitivity 曾出现 hit 76.11%，但 attempts 41,403、retries 17,795、gated 14,881，strict output goodput 下降；retry 制造的额外 hit 不是免费收益。</div>
 <p class="fine">Evidence root：results/m12-sizing-v1.2；final publication 必须 pin git SHA、schema、MANIFEST SHA-256。</p>
 </section>
